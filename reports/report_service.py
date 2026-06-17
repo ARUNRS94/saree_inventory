@@ -16,7 +16,7 @@ class ReportService:
         self.inventory = InventoryRepository(session)
 
     def stock_dataframe(self) -> pd.DataFrame:
-        return pd.DataFrame(self.inventory.stock_report(), columns=["Saree Code", "Saree Name", "Current Stock"])
+        return pd.DataFrame(self.inventory.stock_report(), columns=["Item Code", "Item Name", "Type", "Current Stock"])
 
     def export_stock_pdf(self, output_path: Path) -> Path:
         df = self.stock_dataframe()

@@ -1,6 +1,6 @@
 # Saree Inventory & Job Work Management System
 
-Offline Windows desktop ERP foundation for saree inventory, purchase orders, GRN, job work, stock ledger, valuation, dashboard, and reports.
+Offline Windows desktop ERP foundation for item inventory, contact master, purchase orders, GRN, customer issue, stock ledger, valuation, dashboard, and reports.
 
 ## Stack
 

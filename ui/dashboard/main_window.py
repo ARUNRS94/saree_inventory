@@ -8,12 +8,11 @@ from PySide6.QtWidgets import QMainWindow, QStackedWidget, QToolBar, QWidget
 
 from ui.dashboard import DashboardPage
 from ui.grn import GrnPage
-from ui.jobwork import JobWorkIssuePage, JobWorkReceiptPage
 from ui.purchase import PurchaseOrderPage
 from ui.reports import ReportsPage
 from ui.saree import SareePage
 from ui.supplier import SupplierPage
-from ui.vendor import VendorPage
+from ui.customer_issue import CustomerIssuePage
 from ui.theme import DARK_THEME, LIGHT_THEME
 
 
@@ -22,19 +21,17 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("Saree Inventory & Job Work Management")
+        self.setWindowTitle("Saree Inventory Management")
         self.resize(1280, 800)
         self.pages = QStackedWidget()
         self.setCentralWidget(self.pages)
         self._page_loaders: list[Callable[[], QWidget]] = [
             DashboardPage,
             SupplierPage,
-            VendorPage,
             SareePage,
             PurchaseOrderPage,
             GrnPage,
-            JobWorkIssuePage,
-            JobWorkReceiptPage,
+            CustomerIssuePage,
             ReportsPage,
         ]
         for loader in self._page_loaders:
@@ -46,7 +43,7 @@ class MainWindow(QMainWindow):
     def _build_toolbar(self) -> None:
         toolbar = QToolBar("Navigation")
         toolbar.setMovable(False)
-        labels = ["Dashboard", "Suppliers", "Vendors", "Sarees", "Purchase", "GRN", "JW Issue", "JW Receipt", "Reports"]
+        labels = ["Dashboard", "Contacts", "Items", "Purchase", "GRN", "Customer Issue", "Reports"]
         for index, label in enumerate(labels):
             action = toolbar.addAction(label)
             action.triggered.connect(lambda _checked=False, page=index: self._show_page(page))

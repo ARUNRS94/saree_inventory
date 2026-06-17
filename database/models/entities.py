@@ -23,6 +23,7 @@ class Supplier(TimestampMixin, Base):
     phone: Mapped[str | None] = mapped_column(String(30))
     gst_no: Mapped[str | None] = mapped_column(String(30))
     address: Mapped[str | None] = mapped_column(Text)
+    contact_type: Mapped[str] = mapped_column(String(30), default="RM vendor", server_default="RM vendor", index=True)
     is_active: Mapped[bool] = mapped_column(default=True)
 
     purchase_orders: Mapped[list["PurchaseOrder"]] = relationship(back_populates="supplier")
@@ -58,7 +59,7 @@ class Saree(TimestampMixin, Base):
     saree_code: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     saree_name: Mapped[str] = mapped_column(String(200), nullable=False)
     category: Mapped[str | None] = mapped_column(String(100))
-    fabric: Mapped[str | None] = mapped_column(String(100))
+    fabric: Mapped[str | None] = mapped_column(String(100), default="FG", server_default="FG")
     design_name: Mapped[str | None] = mapped_column(String(150))
     color: Mapped[str | None] = mapped_column(String(80))
     unit: Mapped[str] = mapped_column(String(20), default="PCS")
@@ -85,12 +86,14 @@ class PurchaseOrderItem(Base):
     po_item_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     po_id: Mapped[int] = mapped_column(ForeignKey("purchase_orders.po_id"), nullable=False)
     saree_id: Mapped[int] = mapped_column(ForeignKey("sarees.saree_id"), nullable=False)
+    stock_out_saree_id: Mapped[int | None] = mapped_column(ForeignKey("sarees.saree_id"))
     ordered_qty: Mapped[int] = mapped_column(Integer, nullable=False)
     rate: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
 
     purchase_order: Mapped[PurchaseOrder] = relationship(back_populates="items")
-    saree: Mapped[Saree] = relationship()
+    saree: Mapped[Saree] = relationship(foreign_keys=[saree_id])
+    stock_out_saree: Mapped[Saree | None] = relationship(foreign_keys=[stock_out_saree_id])
 
 
 class GRN(Base):
