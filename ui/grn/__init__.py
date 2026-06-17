@@ -1,1 +1,3 @@
-"""UI module placeholder for incremental screen implementation."""
+from ui.grn.page import GrnPage
+
+__all__ = ["GrnPage"]

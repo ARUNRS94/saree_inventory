@@ -1,1 +1,3 @@
-"""UI module placeholder for incremental screen implementation."""
+from ui.saree.page import SareePage
+
+__all__ = ["SareePage"]

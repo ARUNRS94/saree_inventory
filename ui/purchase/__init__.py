@@ -1,1 +1,3 @@
-"""UI module placeholder for incremental screen implementation."""
+from ui.purchase.page import PurchaseOrderPage
+
+__all__ = ["PurchaseOrderPage"]
