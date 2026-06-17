@@ -27,14 +27,29 @@ class VendorPage(Page):
         self.refresh()
 
     def load_selected(self, row: int, _column: int) -> None:
-        self.selected_id = int(self.table.item(row, 0).text()); self.name.setText(self.table.item(row, 1).text()); self.process.setCurrentText(self.table.item(row, 2).text()); self.phone.setText(self.table.item(row, 3).text()); self.save_button.setText("Update Vendor")
+        self.selected_id = int(self.table.item(row, 0).text())
+        self.name.setText(self.table.item(row, 1).text())
+        process_text = self.table.item(row, 2).text()
+        index = self.process.findText(process_text)
+        if index >= 0:
+            self.process.setCurrentIndex(index)
+        else:
+            self.process.addItem(process_text, process_text)
+            self.process.setCurrentText(process_text)
+        self.phone.setText(self.table.item(row, 3).text())
+        self.save_button.setText("Update Vendor")
 
     def clear_form(self) -> None:
         self.selected_id = None; self.name.clear(); self.phone.clear(); self.process.setCurrentIndex(0); self.save_button.setText("Add Vendor")
 
     def load_process_selected(self, row: int, _column: int) -> None:
-        self.selected_process_id = int(self.process_table.item(row, 0).text())
-        self.new_process.setText(self.process_table.item(row, 1).text())
+        id_item = self.process_table.item(row, 0)
+        process_item = self.process_table.item(row, 1)
+        if id_item is None or process_item is None or not id_item.text().strip():
+            self.error("Select a valid process type row.")
+            return
+        self.selected_process_id = int(id_item.text())
+        self.new_process.setText(process_item.text())
         self.process_button.setText("Update Process Type")
 
     def clear_process_form(self) -> None:
@@ -70,21 +85,29 @@ class VendorPage(Page):
         try:
             with session_scope() as session:
                 if self.selected_id is None:
-                    if not self.process.currentText().strip(): raise ValueError("Create a vendor process type first.")
-                    MasterDataService(session).create_vendor(self.name.text(), self.process.currentText(), phone=self.phone.text()); message = "Vendor added successfully."
+                    process_type = str(self.process.currentData() or self.process.currentText()).strip()
+                    if not process_type: raise ValueError("Create a vendor process type first.")
+                    MasterDataService(session).create_vendor(self.name.text(), process_type, phone=self.phone.text().strip()); message = "Vendor added successfully."
                 else:
                     vendor = session.get(Vendor, self.selected_id)
                     if vendor is None: raise ValueError("Vendor not found.")
+                    process_type = str(self.process.currentData() or self.process.currentText()).strip()
                     if not self.name.text().strip(): raise ValueError("Vendor name is required.")
-                    vendor.vendor_name = self.name.text().strip(); vendor.process_type = self.process.currentText(); vendor.phone = self.phone.text(); message = "Vendor updated successfully."
+                    if not process_type: raise ValueError("Create a vendor process type first.")
+                    vendor.vendor_name = self.name.text().strip(); vendor.process_type = process_type; vendor.phone = self.phone.text().strip(); message = "Vendor updated successfully."
             self.info(message); self.clear_form(); self.refresh()
         except Exception as exc:
             self.error(str(exc))
 
     def refresh(self) -> None:
         with session_scope() as session:
+            selected_process = self.process.currentText().strip()
             process_types = list(session.scalars(select(VendorProcessType).where(VendorProcessType.is_active.is_(True)).order_by(VendorProcessType.process_type)))
             populate_combo(self.process, [(p.process_type, p.process_type) for p in process_types])
+            if selected_process:
+                index = self.process.findText(selected_process)
+                if index >= 0:
+                    self.process.setCurrentIndex(index)
             fill_table(self.process_table, ([p.process_type_id, p.process_type] for p in process_types))
             vendors = session.scalars(select(Vendor).order_by(Vendor.vendor_name))
             fill_table(self.table, ([v.vendor_id, v.vendor_name, v.process_type, v.phone] for v in vendors))

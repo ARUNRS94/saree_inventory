@@ -30,8 +30,17 @@ def populate_combo(combo: QComboBox, rows: Iterable[tuple[int, str]]) -> None:
 
 
 def fill_table(table: QTableWidget, rows: Iterable[Iterable[object]]) -> None:
+    """Populate a table without allowing active sorting to move half-filled rows.
+
+    QTableWidget re-sorts immediately when sorting is enabled. Inserting cells while
+    sorting is active can move the current row before every column is populated,
+    which leaves apparent blank cells in tables such as Vendor Process Types.
+    """
+    was_sorting_enabled = table.isSortingEnabled()
+    table.setSortingEnabled(False)
     table.setRowCount(0)
     for row_index, row_values in enumerate(rows):
         table.insertRow(row_index)
         for column_index, value in enumerate(row_values):
             table.setItem(row_index, column_index, QTableWidgetItem("" if value is None else str(value)))
+    table.setSortingEnabled(was_sorting_enabled)

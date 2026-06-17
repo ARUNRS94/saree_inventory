@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QComboBox, QDoubleSpinBox, QFormLayout, QLabel, QP
 from sqlalchemy import select
 
 from database.database import session_scope
-from database.models.entities import PurchaseOrder, Saree
+from database.models.entities import PurchaseOrder, PurchaseOrderItem, Saree
 from services.purchase_service import PurchaseService
 from ui.common import Page, populate_combo
 
@@ -27,7 +27,7 @@ class GrnPage(Page):
         form.addRow(self.pending)
         form.addRow("Received Qty", self.received)
         form.addRow("Damaged Qty", self.damaged)
-        form.addRow("Rate", self.rate)
+        form.addRow("Unit Rate", self.rate)
         save = QPushButton("Save GRN")
         save.clicked.connect(self.save)
         form.addRow(save)
@@ -47,8 +47,17 @@ class GrnPage(Page):
             self.pending.setText("Pending: 0")
             return
         with session_scope() as session:
-            qty = PurchaseService(session).pending_po_qty(int(self.po.currentData()), int(self.saree.currentData()))
+            po_id = int(self.po.currentData())
+            saree_id = int(self.saree.currentData())
+            qty = PurchaseService(session).pending_po_qty(po_id, saree_id)
+            po_rate = session.scalar(
+                select(PurchaseOrderItem.rate)
+                .where(PurchaseOrderItem.po_id == po_id, PurchaseOrderItem.saree_id == saree_id)
+                .order_by(PurchaseOrderItem.po_item_id.desc())
+                .limit(1)
+            )
             self.pending.setText(f"Pending: {qty}")
+            self.rate.setValue(float(po_rate or 0))
 
     def save(self) -> None:
         try:
