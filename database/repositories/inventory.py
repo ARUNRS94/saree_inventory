@@ -14,6 +14,7 @@ class InventoryRepository:
         self.session = session
 
     def current_stock(self, saree_id: int | None = None) -> int:
+        self.session.flush()
         stmt: Select[tuple[int | None]] = select(func.coalesce(func.sum(StockLedger.qty_in - StockLedger.qty_out), 0))
         if saree_id is not None:
             stmt = stmt.where(StockLedger.saree_id == saree_id)
@@ -70,10 +71,16 @@ class InventoryRepository:
         """Return total inventory value from saree-wise valuation rows."""
         return sum((row[5] for row in self.inventory_valuation_rows()), Decimal("0"))
 
-    def stock_report(self) -> list[tuple[str, str, int]]:
+    def stock_report(self) -> list[tuple[str, str, str, int]]:
         balance = func.coalesce(func.sum(StockLedger.qty_in - StockLedger.qty_out), 0).label("current_stock")
-        stmt = select(Saree.saree_code, Saree.saree_name, balance).outerjoin(StockLedger).group_by(Saree.saree_id)
-        return [(code, name, int(stock or 0)) for code, name, stock in self.session.execute(stmt)]
+        stmt = select(Saree.saree_code, Saree.saree_name, Saree.fabric, balance).outerjoin(StockLedger).group_by(Saree.saree_id)
+        return [(code, name, item_type or "FG", int(stock or 0)) for code, name, item_type, stock in self.session.execute(stmt)]
+
+    def stock_by_item_type(self) -> dict[str, int]:
+        totals = {"RM": 0, "Sub process": 0, "FG": 0}
+        for _code, _name, item_type, stock in self.stock_report():
+            totals[item_type or "FG"] = totals.get(item_type or "FG", 0) + stock
+        return totals
 
     def pending_purchase_orders(self) -> int:
         return int(self.session.scalar(select(func.count()).select_from(PurchaseOrder).where(PurchaseOrder.status != "CLOSED")) or 0)

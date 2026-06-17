@@ -1,4 +1,4 @@
-"""Purchase order and GRN workflows."""
+"""Purchase order, sub-vendor processing and GRN workflows."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -8,7 +8,7 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from database.models.entities import GRN, GRNItem, PurchaseOrder, PurchaseOrderItem
+from database.models.entities import GRN, GRNItem, PurchaseOrder, PurchaseOrderItem, Supplier
 from services.inventory_service import InventoryService
 from services.numbering import next_number
 
@@ -18,10 +18,11 @@ class PurchaseLine:
     saree_id: int
     quantity: int
     rate: Decimal
+    stock_out_saree_id: int | None = None
 
 
 class PurchaseService:
-    """Business rules for purchase orders and goods receipts."""
+    """Business rules for RM vendor purchase and sub-vendor process orders."""
 
     def __init__(self, session: Session) -> None:
         self.session = session
@@ -30,7 +31,12 @@ class PurchaseService:
     def create_po(self, supplier_id: int, lines: list[PurchaseLine], po_date: date | None = None,
                   expected_date: date | None = None, remarks: str | None = None) -> PurchaseOrder:
         if not lines:
-            raise ValueError("Purchase order requires at least one saree line.")
+            raise ValueError("Purchase order requires at least one item line.")
+        contact = self.session.get(Supplier, supplier_id)
+        if contact is None:
+            raise ValueError("Contact not found.")
+        if contact.contact_type == "Customer":
+            raise ValueError("Purchase orders can be created only for RM vendors or Sub vendors.")
         document_date = po_date or date.today()
         po = PurchaseOrder(
             po_number=next_number(self.session, PurchaseOrder, "po_number", "PO", document_date),
@@ -42,10 +48,24 @@ class PurchaseService:
         )
         for line in lines:
             if line.quantity <= 0 or line.rate < 0:
-                raise ValueError("PO quantity must be positive and rate cannot be negative.")
+                raise ValueError("PO quantity must be positive and rate/process charges cannot be negative.")
+            if contact.contact_type == "Sub vendor":
+                if line.stock_out_saree_id is None:
+                    raise ValueError("Select the RM stock-out item for Sub vendor process orders.")
+                self.inventory.assert_available(line.stock_out_saree_id, line.quantity)
+                self.inventory.post_ledger(
+                    transaction_date=document_date,
+                    transaction_type="SUB_VENDOR_ISSUE",
+                    reference_no=po.po_number,
+                    saree_id=line.stock_out_saree_id,
+                    qty_out=line.quantity,
+                    rate=line.rate,
+                    remarks=remarks,
+                )
             po.items.append(
                 PurchaseOrderItem(
                     saree_id=line.saree_id,
+                    stock_out_saree_id=line.stock_out_saree_id,
                     ordered_qty=line.quantity,
                     rate=line.rate,
                     amount=line.rate * line.quantity,
@@ -69,6 +89,7 @@ class PurchaseService:
             grn_date=document_date,
             remarks=remarks,
         )
+        transaction_type = "SUB_VENDOR_GRN" if po.supplier.contact_type == "Sub vendor" else "PURCHASE"
         for saree_id, received_qty, damaged_qty, rate in lines:
             total_receipt_qty = received_qty + damaged_qty
             if received_qty < 0 or damaged_qty < 0 or total_receipt_qty <= 0:
@@ -80,7 +101,7 @@ class PurchaseService:
             if received_qty:
                 self.inventory.post_ledger(
                     transaction_date=document_date,
-                    transaction_type="PURCHASE",
+                    transaction_type=transaction_type,
                     reference_no=grn.grn_number,
                     saree_id=saree_id,
                     qty_in=received_qty,
