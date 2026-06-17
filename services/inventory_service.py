@@ -4,10 +4,9 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from database.models.entities import Saree, StockLedger
+from database.models.entities import StockLedger
 from database.repositories.inventory import InventoryRepository
 
 
@@ -41,10 +40,5 @@ class InventoryService:
         return entry
 
     def inventory_value(self) -> Decimal:
-        """Calculate stock value as current stock per saree multiplied by latest purchase rate."""
-        total = Decimal("0")
-        for saree_id in self.session.scalars(select(Saree.saree_id)):
-            stock = self.repo.current_stock(saree_id)
-            if stock > 0:
-                total += Decimal(stock) * self.repo.latest_purchase_rate(saree_id)
-        return total
+        """Calculate stock value as SUM(current stock × latest purchase rate) for every saree."""
+        return self.repo.total_inventory_value()

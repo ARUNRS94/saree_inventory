@@ -63,8 +63,6 @@ class ReportsPage(Page):
 
     def _valuation_rows(self, session, inventory: InventoryRepository) -> list[list[object]]:
         rows: list[list[object]] = []
-        for saree in session.scalars(select(Saree).order_by(Saree.saree_code)):
-            stock = inventory.current_stock(saree.saree_id)
-            rate = inventory.latest_purchase_rate(saree.saree_id)
-            rows.append([f"{saree.saree_code} - {saree.saree_name}", stock, rate, Decimal(stock) * rate])
+        for _saree_id, code, name, stock, rate, value in inventory.inventory_valuation_rows():
+            rows.append([f"{code} - {name}", stock, rate, value])
         return rows
