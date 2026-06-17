@@ -31,7 +31,7 @@ class PurchaseOrderPage(Page):
             contacts = session.scalars(select(Supplier).where(Supplier.contact_type.in_(["RM vendor", "Sub vendor"])).order_by(Supplier.supplier_name))
             populate_combo(self.supplier, [(s.supplier_id, f"{s.supplier_name} ({s.contact_type})") for s in contacts])
             populate_combo(self.stock_out_item, [(s.saree_id, f"{s.saree_code} - {s.saree_name}") for s in session.scalars(select(Saree).where(Saree.fabric == "RM").order_by(Saree.saree_code))])
-            populate_combo(self.saree, [(s.saree_id, f"{s.saree_code} - {s.saree_name} ({s.fabric})") for s in session.scalars(select(Saree).order_by(Saree.saree_code))])
+            self._populate_stock_in_items(session)
             pos = session.scalars(select(PurchaseOrder).options(selectinload(PurchaseOrder.items).selectinload(PurchaseOrderItem.saree), selectinload(PurchaseOrder.items).selectinload(PurchaseOrderItem.stock_out_saree), selectinload(PurchaseOrder.supplier)).order_by(PurchaseOrder.po_id.desc()))
             rows = []
             for po in pos:
@@ -47,9 +47,15 @@ class PurchaseOrderPage(Page):
         text = self.supplier.currentText()
         return "Sub vendor" if "(Sub vendor)" in text else "RM vendor"
 
+    def _populate_stock_in_items(self, session) -> None:
+        item_type = "Sub process" if self.selected_contact_type() == "Sub vendor" else "RM"
+        populate_combo(self.saree, [(s.saree_id, f"{s.saree_code} - {s.saree_name} ({s.fabric})") for s in session.scalars(select(Saree).where(Saree.fabric == item_type).order_by(Saree.saree_code))])
+
     def update_contact_mode(self) -> None:
         is_sub_vendor = self.selected_contact_type() == "Sub vendor"
         self.stock_out_item.setEnabled(is_sub_vendor)
+        with session_scope() as session:
+            self._populate_stock_in_items(session)
 
     def recalculate(self) -> None:
         self.amount.setText(f"{self.quantity.value() * self.rate.value():,.2f}")

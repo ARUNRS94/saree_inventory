@@ -23,7 +23,7 @@ class GrnPage(Page):
         self.damaged = QSpinBox(); self.damaged.setRange(0, 100000)
         self.rate = QDoubleSpinBox(); self.rate.setRange(0, 10000000); self.rate.setDecimals(2)
         form.addRow("PO", self.po)
-        form.addRow("Saree", self.saree)
+        form.addRow("Stock In Item", self.saree)
         form.addRow(self.pending)
         form.addRow("Received Qty", self.received)
         form.addRow("Damaged Qty", self.damaged)
@@ -32,14 +32,29 @@ class GrnPage(Page):
         save.clicked.connect(self.save)
         form.addRow(save)
         self.layout.addLayout(form)
-        self.po.currentIndexChanged.connect(self.update_pending)
+        self.po.currentIndexChanged.connect(self.update_stock_in_items)
         self.saree.currentIndexChanged.connect(self.update_pending)
         self.refresh()
 
     def refresh(self) -> None:
         with session_scope() as session:
-            populate_combo(self.po, [(p.po_id, p.po_number) for p in session.scalars(select(PurchaseOrder).where(PurchaseOrder.status != "CLOSED").order_by(PurchaseOrder.po_id.desc()))])
-            populate_combo(self.saree, [(s.saree_id, f"{s.saree_code} - {s.saree_name}") for s in session.scalars(select(Saree).order_by(Saree.saree_code))])
+            populate_combo(self.po, [(p.po_id, f"{p.po_number} - {p.supplier.supplier_name} ({p.supplier.contact_type})") for p in session.scalars(select(PurchaseOrder).where(PurchaseOrder.status != "CLOSED").order_by(PurchaseOrder.po_id.desc()))])
+        self.update_stock_in_items()
+
+    def update_stock_in_items(self) -> None:
+        if self.po.currentData() is None:
+            populate_combo(self.saree, [])
+            self.update_pending()
+            return
+        with session_scope() as session:
+            po = session.get(PurchaseOrder, int(self.po.currentData()))
+            if po is None:
+                rows = []
+            elif po.supplier.contact_type == "Sub vendor":
+                rows = [(s.saree_id, f"{s.saree_code} - {s.saree_name} (FG)") for s in session.scalars(select(Saree).where(Saree.fabric == "FG").order_by(Saree.saree_code))]
+            else:
+                rows = [(item.saree_id, f"{item.saree.saree_code} - {item.saree.saree_name} (RM)") for item in po.items]
+        populate_combo(self.saree, rows)
         self.update_pending()
 
     def update_pending(self) -> None:
@@ -48,11 +63,13 @@ class GrnPage(Page):
             return
         with session_scope() as session:
             po_id = int(self.po.currentData())
+            po = session.get(PurchaseOrder, po_id)
             saree_id = int(self.saree.currentData())
-            qty = PurchaseService(session).pending_po_qty(po_id, saree_id)
+            is_sub_vendor = po is not None and po.supplier.contact_type == "Sub vendor"
+            qty = PurchaseService(session).pending_po_qty(po_id, None if is_sub_vendor else saree_id)
             po_rate = session.scalar(
                 select(PurchaseOrderItem.rate)
-                .where(PurchaseOrderItem.po_id == po_id, PurchaseOrderItem.saree_id == saree_id)
+                .where(PurchaseOrderItem.po_id == po_id)
                 .order_by(PurchaseOrderItem.po_item_id.desc())
                 .limit(1)
             )
