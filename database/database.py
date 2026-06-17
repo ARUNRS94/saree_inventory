@@ -33,14 +33,7 @@ def session_scope() -> Iterator[Session]:
 
 
 def init_db() -> None:
-    """Create database tables for the offline SQLite store and seed defaults."""
+    """Create database tables for the offline SQLite store."""
     from database.models import entities  # noqa: F401
-    from database.models.entities import VendorProcessType
 
     Base.metadata.create_all(bind=engine)
-    with SessionLocal() as session:
-        for process_type in ["Dyeing", "Stoning", "Finishing", "Printing"]:
-            exists = session.query(VendorProcessType).filter_by(process_type=process_type).first()
-            if exists is None:
-                session.add(VendorProcessType(process_type=process_type))
-        session.commit()

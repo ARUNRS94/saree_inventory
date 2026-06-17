@@ -20,7 +20,7 @@ class VendorPage(Page):
         self.layout.addLayout(form)
 
         process_form = QHBoxLayout(); self.new_process = QLineEdit(); self.new_process.setPlaceholderText("New process type, e.g. Embroidery"); add_process = QPushButton("Add Process Type"); add_process.clicked.connect(self.add_process_type); process_form.addWidget(self.new_process); process_form.addWidget(add_process); self.layout.addLayout(process_form)
-        self.process_table = QTableWidget(0, 2); self.process_table.setHorizontalHeaderLabels(["ID", "Process Type"]); self.process_table.setColumnHidden(0, True); self.process_table.setSortingEnabled(True); self.layout.addWidget(self.process_table)
+        self.process_table = QTableWidget(0, 1); self.process_table.setHorizontalHeaderLabels(["Process Type"]); self.process_table.setSortingEnabled(True); self.layout.addWidget(self.process_table)
 
         self.table = QTableWidget(0, 4); self.table.setHorizontalHeaderLabels(["ID", "Name", "Process", "Phone"]); self.table.setColumnHidden(0, True); self.table.setSortingEnabled(True); self.table.cellDoubleClicked.connect(self.load_selected); self.layout.addWidget(self.table)
         self.refresh()
@@ -48,6 +48,7 @@ class VendorPage(Page):
         try:
             with session_scope() as session:
                 if self.selected_id is None:
+                    if not self.process.currentText().strip(): raise ValueError("Create a vendor process type first.")
                     MasterDataService(session).create_vendor(self.name.text(), self.process.currentText(), phone=self.phone.text()); message = "Vendor added successfully."
                 else:
                     vendor = session.get(Vendor, self.selected_id)
@@ -61,7 +62,7 @@ class VendorPage(Page):
     def refresh(self) -> None:
         with session_scope() as session:
             process_types = list(session.scalars(select(VendorProcessType).where(VendorProcessType.is_active.is_(True)).order_by(VendorProcessType.process_type)))
-            populate_combo(self.process, [(p.process_type_id, p.process_type) for p in process_types])
-            fill_table(self.process_table, ([p.process_type_id, p.process_type] for p in process_types))
+            populate_combo(self.process, [(p.process_type, p.process_type) for p in process_types])
+            fill_table(self.process_table, ([p.process_type] for p in process_types))
             vendors = session.scalars(select(Vendor).order_by(Vendor.vendor_name))
             fill_table(self.table, ([v.vendor_id, v.vendor_name, v.process_type, v.phone] for v in vendors))
