@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from PySide6.QtWidgets import QComboBox, QGridLayout, QLabel, QTabWidget, QTableWidget, QVBoxLayout, QWidget
 
 from database.database import session_scope
-from database.models.entities import GRN, GRNItem, PurchaseOrder, PurchaseOrderItem, Supplier
+from database.models.entities import GRN, GRNItem, PurchaseOrder, PurchaseOrderItem, Saree, StockLedger, Supplier
 from database.repositories.inventory import InventoryRepository
 from ui.common import Page, fill_table, populate_combo
 
@@ -25,8 +25,9 @@ class ReportsPage(Page):
         self.tabs.setDocumentMode(False)
         self.layout.addWidget(self.tabs)
         self.stock_table = self._add_table_tab("Stock Report", ["Item Code", "Item Name", "Type", "Current Stock"])
-        self.purchase_table = self._add_table_tab("Purchase Report", ["PO Number", "Vendor", "Type", "Date", "Purchase Qty", "Value", "Status"])
-        self.vendor_wip_table = self._add_table_tab("Sub Vendor WIP", ["Sub Vendor", "Issued Qty", "Received Qty", "Pending Qty"])
+        self.purchase_table = self._add_table_tab("Purchase Report", ["PO Number", "Vendor", "Type", "Date", "Stock In Items", "Purchase Qty", "Value", "Status"])
+        self.vendor_wip_table = self._add_table_tab("Sub Vendor WIP", ["Sub Vendor", "WIP Item", "Issued Qty", "Received Qty", "Pending Qty"])
+        self.ledger_table = self._add_table_tab("Stock Ledger", ["Date", "Type", "Reference", "Item", "In", "Out", "Current Stock", "Rate", "Remarks"])
         self.valuation_table = self._add_table_tab("Inventory Valuation", ["Item", "Stock", "Latest Rate", "Value"])
         self.refresh_filters()
         self.refresh()
@@ -59,10 +60,12 @@ class ReportsPage(Page):
             stock_rows = inventory.stock_report()
             purchase_rows = self._purchase_rows(session, contact_id)
             vendor_wip_rows = self._vendor_wip_rows(session, contact_id)
+            ledger_rows = self._ledger_rows(session)
             valuation_rows = self._valuation_rows(inventory)
             fill_table(self.stock_table, stock_rows)
             fill_table(self.purchase_table, purchase_rows)
             fill_table(self.vendor_wip_table, vendor_wip_rows)
+            fill_table(self.ledger_table, ledger_rows)
             fill_table(self.valuation_table, valuation_rows)
             self._refresh_summary_cards(stock_rows, purchase_rows, vendor_wip_rows, valuation_rows)
 
@@ -73,8 +76,8 @@ class ReportsPage(Page):
             if widget is not None:
                 widget.deleteLater()
         total_stock = sum(row[3] for row in stock_rows)
-        total_purchase_qty = sum(int(row[4] or 0) for row in purchase_rows)
-        total_pending_wip = sum(int(row[3]) for row in vendor_wip_rows)
+        total_purchase_qty = sum(int(row[5] or 0) for row in purchase_rows)
+        total_pending_wip = sum(int(row[4]) for row in vendor_wip_rows)
         total_inventory_value = sum(Decimal(str(row[3] or 0)) for row in valuation_rows)
         cards = [("Total Stock", f"{total_stock} pcs"), ("Inventory Value", f"₹ {total_inventory_value:,.2f}"), ("Purchase Qty", f"{total_purchase_qty} pcs"), ("Sub Vendor WIP", f"{total_pending_wip} pcs")]
         for index, (title, value) in enumerate(cards):
@@ -86,15 +89,15 @@ class ReportsPage(Page):
         amount = func.coalesce(func.sum(PurchaseOrderItem.amount), 0)
         qty = func.coalesce(func.sum(PurchaseOrderItem.ordered_qty), 0)
         stmt = (
-            select(PurchaseOrder.po_number, Supplier.supplier_name, Supplier.contact_type, PurchaseOrder.po_date, qty, amount, PurchaseOrder.status)
+            select(PurchaseOrder.po_number, Supplier.supplier_name, Supplier.contact_type, PurchaseOrder.po_date, func.group_concat(Saree.saree_code, ", "), qty, amount, PurchaseOrder.status)
             .join(Supplier)
-            .outerjoin(PurchaseOrderItem)
+            .outerjoin(PurchaseOrderItem).outerjoin(Saree, Saree.saree_id == PurchaseOrderItem.saree_id)
             .group_by(PurchaseOrder.po_id)
             .order_by(PurchaseOrder.po_date.desc(), PurchaseOrder.po_id.desc())
         )
         if contact_id:
             stmt = stmt.where(PurchaseOrder.supplier_id == contact_id)
-        return [[po_no, supplier, contact_type, po_date, int(purchase_qty or 0), value, status] for po_no, supplier, contact_type, po_date, purchase_qty, value, status in session.execute(stmt)]
+        return [[po_no, supplier, contact_type, po_date, items or "", int(purchase_qty or 0), value, status] for po_no, supplier, contact_type, po_date, items, purchase_qty, value, status in session.execute(stmt)]
 
     def _vendor_wip_rows(self, session, contact_id: int = 0) -> list[list[object]]:
         rows: list[list[object]] = []
@@ -102,9 +105,34 @@ class ReportsPage(Page):
         if contact_id:
             stmt = stmt.where(Supplier.supplier_id == contact_id)
         for vendor in session.scalars(stmt):
-            issued = session.scalar(select(func.coalesce(func.sum(PurchaseOrderItem.ordered_qty), 0)).join(PurchaseOrder).where(PurchaseOrder.supplier_id == vendor.supplier_id, PurchaseOrderItem.stock_out_saree_id.is_not(None))) or 0
+            item_stmt = (
+                select(Saree.saree_code, Saree.saree_name, func.coalesce(func.sum(PurchaseOrderItem.ordered_qty), 0))
+                .join(PurchaseOrderItem, PurchaseOrderItem.saree_id == Saree.saree_id)
+                .join(PurchaseOrder)
+                .where(PurchaseOrder.supplier_id == vendor.supplier_id, PurchaseOrderItem.stock_out_saree_id.is_not(None))
+                .group_by(Saree.saree_id)
+                .order_by(Saree.saree_code)
+            )
             received = session.scalar(select(func.coalesce(func.sum(GRNItem.received_qty + GRNItem.damaged_qty), 0)).join(GRN).join(PurchaseOrder).where(PurchaseOrder.supplier_id == vendor.supplier_id)) or 0
-            rows.append([vendor.supplier_name, int(issued), int(received), max(int(issued) - int(received), 0)])
+            remaining_received = int(received)
+            for code, name, issued in session.execute(item_stmt):
+                item_received = min(int(issued), remaining_received)
+                remaining_received = max(remaining_received - item_received, 0)
+                rows.append([vendor.supplier_name, f"{code} - {name}", int(issued), item_received, max(int(issued) - item_received, 0)])
+        return rows
+
+    def _ledger_rows(self, session) -> list[list[object]]:
+        rows: list[list[object]] = []
+        stmt = (
+            select(StockLedger, Saree.saree_code, Saree.saree_name)
+            .join(Saree, Saree.saree_id == StockLedger.saree_id)
+            .order_by(StockLedger.transaction_date.desc(), StockLedger.ledger_id.desc())
+            .limit(250)
+        )
+        inventory = InventoryRepository(session)
+        for entry, code, name in session.execute(stmt):
+            current_stock = inventory.current_stock(entry.saree_id)
+            rows.append([entry.transaction_date, entry.transaction_type, entry.reference_no, f"{code} - {name}", entry.qty_in, entry.qty_out, current_stock, entry.rate, entry.remarks])
         return rows
 
     def _valuation_rows(self, inventory: InventoryRepository) -> list[list[object]]:

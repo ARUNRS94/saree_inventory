@@ -8,7 +8,7 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from database.models.entities import GRN, GRNItem, PurchaseOrder, PurchaseOrderItem, Supplier
+from database.models.entities import GRN, GRNItem, PurchaseOrder, PurchaseOrderItem, Saree, Supplier
 from services.inventory_service import InventoryService
 from services.numbering import next_number
 
@@ -49,7 +49,14 @@ class PurchaseService:
         for line in lines:
             if line.quantity <= 0 or line.rate < 0:
                 raise ValueError("PO quantity must be positive and rate/process charges cannot be negative.")
+            stock_in_item = self.session.get(Saree, line.saree_id)
+            if stock_in_item is None:
+                raise ValueError("Stock-in item not found.")
+            if contact.contact_type == "RM vendor" and stock_in_item.fabric != "RM":
+                raise ValueError("RM vendor purchase orders can stock in only RM items.")
             if contact.contact_type == "Sub vendor":
+                if stock_in_item.fabric != "Sub process":
+                    raise ValueError("Sub vendor purchase orders can stock in only Sub process items.")
                 if line.stock_out_saree_id is None:
                     raise ValueError("Select the RM stock-out item for Sub vendor process orders.")
                 self.inventory.assert_available(line.stock_out_saree_id, line.quantity)
@@ -59,6 +66,15 @@ class PurchaseService:
                     reference_no=po.po_number,
                     saree_id=line.stock_out_saree_id,
                     qty_out=line.quantity,
+                    rate=line.rate,
+                    remarks=remarks,
+                )
+                self.inventory.post_ledger(
+                    transaction_date=document_date,
+                    transaction_type="WIP_STOCK_IN",
+                    reference_no=po.po_number,
+                    saree_id=line.saree_id,
+                    qty_in=line.quantity,
                     rate=line.rate,
                     remarks=remarks,
                 )
@@ -94,10 +110,21 @@ class PurchaseService:
             total_receipt_qty = received_qty + damaged_qty
             if received_qty < 0 or damaged_qty < 0 or total_receipt_qty <= 0:
                 raise ValueError("Received or damaged quantity is required.")
-            pending = self.pending_po_qty(po_id, saree_id)
+            if po.supplier.contact_type == "Sub vendor":
+                fg_item = self.session.get(Saree, saree_id)
+                if fg_item is None or fg_item.fabric != "FG":
+                    raise ValueError("Sub vendor GRN stock-in item must be an FG item.")
+                pending = self.pending_po_qty(po_id)
+            else:
+                stock_in_item = self.session.get(Saree, saree_id)
+                if stock_in_item is None or stock_in_item.fabric != "RM":
+                    raise ValueError("RM vendor GRN stock-in item must be an RM item.")
+                pending = self.pending_po_qty(po_id, saree_id)
             if total_receipt_qty > pending:
                 raise ValueError(f"Receipt quantity exceeds pending PO quantity. Pending: {pending}.")
             grn.items.append(GRNItem(saree_id=saree_id, received_qty=received_qty, damaged_qty=damaged_qty, rate=rate))
+            if po.supplier.contact_type == "Sub vendor":
+                self._consume_wip_for_sub_vendor_grn(po, total_receipt_qty, document_date, grn.grn_number, rate, remarks)
             if received_qty:
                 self.inventory.post_ledger(
                     transaction_date=document_date,
@@ -122,14 +149,44 @@ class PurchaseService:
             ) or 0
         )
 
-    def pending_po_qty(self, po_id: int, saree_id: int) -> int:
-        ordered = int(
-            self.session.scalar(
-                select(func.coalesce(func.sum(PurchaseOrderItem.ordered_qty), 0))
-                .where(PurchaseOrderItem.po_id == po_id, PurchaseOrderItem.saree_id == saree_id)
-            ) or 0
-        )
-        return max(ordered - self.already_received_qty(po_id, saree_id), 0)
+    def pending_po_qty(self, po_id: int, saree_id: int | None = None) -> int:
+        stmt = select(func.coalesce(func.sum(PurchaseOrderItem.ordered_qty), 0)).where(PurchaseOrderItem.po_id == po_id)
+        if saree_id is not None:
+            stmt = stmt.where(PurchaseOrderItem.saree_id == saree_id)
+        ordered = int(self.session.scalar(stmt) or 0)
+        if saree_id is None:
+            received = int(
+                self.session.scalar(
+                    select(func.coalesce(func.sum(GRNItem.received_qty + GRNItem.damaged_qty), 0))
+                    .join(GRN)
+                    .where(GRN.po_id == po_id)
+                ) or 0
+            )
+        else:
+            received = self.already_received_qty(po_id, saree_id)
+        return max(ordered - received, 0)
+
+    def _consume_wip_for_sub_vendor_grn(self, po: PurchaseOrder, quantity: int, document_date: date,
+                                        reference_no: str, rate: Decimal, remarks: str | None) -> None:
+        remaining = quantity
+        for item in po.items:
+            if remaining <= 0:
+                break
+            available = self.inventory.repo.current_stock(item.saree_id)
+            consume_qty = min(remaining, item.ordered_qty, available)
+            if consume_qty > 0:
+                self.inventory.post_ledger(
+                    transaction_date=document_date,
+                    transaction_type="WIP_STOCK_OUT",
+                    reference_no=reference_no,
+                    saree_id=item.saree_id,
+                    qty_out=consume_qty,
+                    rate=rate,
+                    remarks=remarks,
+                )
+                remaining -= consume_qty
+        if remaining > 0:
+            raise ValueError("Insufficient WIP stock to complete the Sub vendor GRN.")
 
     def _update_po_status(self, po: PurchaseOrder) -> None:
         ordered = sum(item.ordered_qty for item in po.items)
