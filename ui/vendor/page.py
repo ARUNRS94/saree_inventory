@@ -43,8 +43,13 @@ class VendorPage(Page):
         self.selected_id = None; self.name.clear(); self.phone.clear(); self.process.setCurrentIndex(0); self.save_button.setText("Add Vendor")
 
     def load_process_selected(self, row: int, _column: int) -> None:
-        self.selected_process_id = int(self.process_table.item(row, 0).text())
-        self.new_process.setText(self.process_table.item(row, 1).text())
+        id_item = self.process_table.item(row, 0)
+        process_item = self.process_table.item(row, 1)
+        if id_item is None or process_item is None or not id_item.text().strip():
+            self.error("Select a valid process type row.")
+            return
+        self.selected_process_id = int(id_item.text())
+        self.new_process.setText(process_item.text())
         self.process_button.setText("Update Process Type")
 
     def clear_process_form(self) -> None:
