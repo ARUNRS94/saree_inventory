@@ -16,9 +16,14 @@ class DashboardPage(Page):
         with session_scope() as session:
             inventory = InventoryRepository(session)
             cards = QGridLayout()
-            cards.addWidget(QLabel(f"Total Stock Quantity\n{inventory.current_stock()}"), 0, 0)
-            cards.addWidget(QLabel(f"Inventory Value\n₹ {InventoryService(session).inventory_value():,.2f}"), 0, 1)
-            cards.addWidget(QLabel(f"Purchase Orders Pending\n{inventory.pending_purchase_orders()}"), 0, 2)
+            for column, text in enumerate([
+                f"Total Stock Quantity\n{inventory.current_stock()}",
+                f"Inventory Value\n₹ {InventoryService(session).inventory_value():,.2f}",
+                f"Purchase Orders Pending\n{inventory.pending_purchase_orders()}",
+            ]):
+                card = QLabel(text)
+                card.setProperty("card", True)
+                cards.addWidget(card, 0, column)
             self.layout.addLayout(cards)
             self.table = QTableWidget(0, 5)
             self.table.setHorizontalHeaderLabels(["Date", "Type", "Reference", "Qty In", "Qty Out"])

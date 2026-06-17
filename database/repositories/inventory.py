@@ -20,13 +20,23 @@ class InventoryRepository:
         return int(self.session.scalar(stmt) or 0)
 
     def latest_purchase_rate(self, saree_id: int) -> Decimal:
-        stmt = (
+        """Return the newest purchase rate posted to stock, falling back to GRN item rate."""
+        ledger_stmt = (
+            select(StockLedger.rate)
+            .where(StockLedger.saree_id == saree_id, StockLedger.transaction_type == "PURCHASE")
+            .order_by(StockLedger.transaction_date.desc(), StockLedger.ledger_id.desc())
+            .limit(1)
+        )
+        ledger_rate = self.session.scalar(ledger_stmt)
+        if ledger_rate is not None:
+            return Decimal(ledger_rate)
+        grn_stmt = (
             select(GRNItem.rate)
             .where(GRNItem.saree_id == saree_id)
             .order_by(GRNItem.grn_item_id.desc())
             .limit(1)
         )
-        return Decimal(self.session.scalar(stmt) or 0)
+        return Decimal(self.session.scalar(grn_stmt) or 0)
 
     def stock_report(self) -> list[tuple[str, str, int]]:
         balance = func.coalesce(func.sum(StockLedger.qty_in - StockLedger.qty_out), 0).label("current_stock")

@@ -41,9 +41,10 @@ class InventoryService:
         return entry
 
     def inventory_value(self) -> Decimal:
+        """Calculate stock value as current stock per saree multiplied by latest purchase rate."""
         total = Decimal("0")
-        for code, _name, stock in self.repo.stock_report():
-            saree_id = self.session.scalar(select(Saree.saree_id).where(Saree.saree_code == code))
-            if saree_id is not None:
+        for saree_id in self.session.scalars(select(Saree.saree_id)):
+            stock = self.repo.current_stock(saree_id)
+            if stock > 0:
                 total += Decimal(stock) * self.repo.latest_purchase_rate(saree_id)
         return total
