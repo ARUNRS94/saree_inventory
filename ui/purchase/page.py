@@ -1,13 +1,14 @@
-"""Purchase order UI with create and status edit support."""
+"""Purchase order UI with create, detailed table and status edit support."""
 from __future__ import annotations
 
 from decimal import Decimal
 
 from PySide6.QtWidgets import QComboBox, QDoubleSpinBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSpinBox, QTableWidget
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from database.database import session_scope
-from database.models.entities import PurchaseOrder, Saree, Supplier
+from database.models.entities import PurchaseOrder, PurchaseOrderItem, Saree, Supplier
 from services.purchase_service import PurchaseLine, PurchaseService
 from ui.common import Page, fill_table, populate_combo
 
@@ -20,22 +21,30 @@ class PurchaseOrderPage(Page):
         form.addRow("Supplier", self.supplier); form.addRow("Saree", self.saree); form.addRow("Quantity", self.quantity); form.addRow("Rate", self.rate); form.addRow("Amount", self.amount); form.addRow("Status", self.status); form.addRow("Remarks", self.remarks)
         buttons = QHBoxLayout(); self.save_button = QPushButton("Create PO"); self.save_button.clicked.connect(self.save); clear = QPushButton("Clear"); clear.clicked.connect(self.clear_form); buttons.addWidget(self.save_button); buttons.addWidget(clear); form.addRow(buttons)
         self.layout.addLayout(form)
-        self.table = QTableWidget(0, 5); self.table.setHorizontalHeaderLabels(["ID", "PO No", "Supplier Id", "Date", "Status"]); self.table.setColumnHidden(0, True); self.table.setSortingEnabled(True); self.table.cellDoubleClicked.connect(self.load_selected); self.layout.addWidget(self.table)
+        self.table = QTableWidget(0, 12)
+        self.table.setHorizontalHeaderLabels(["PO ID", "PO No", "Supplier", "PO Date", "Expected", "Status", "Saree Code", "Saree Name", "Ordered Qty", "Rate", "Amount", "Remarks"])
+        self.table.setColumnHidden(0, True); self.table.setSortingEnabled(True); self.table.cellDoubleClicked.connect(self.load_selected); self.layout.addWidget(self.table)
         self.quantity.valueChanged.connect(self.recalculate); self.rate.valueChanged.connect(self.recalculate); self.refresh()
 
     def refresh(self) -> None:
         with session_scope() as session:
             populate_combo(self.supplier, [(s.supplier_id, s.supplier_name) for s in session.scalars(select(Supplier).order_by(Supplier.supplier_name))])
             populate_combo(self.saree, [(s.saree_id, f"{s.saree_code} - {s.saree_name}") for s in session.scalars(select(Saree).order_by(Saree.saree_code))])
-            pos = session.scalars(select(PurchaseOrder).order_by(PurchaseOrder.po_id.desc()))
-            fill_table(self.table, ([p.po_id, p.po_number, p.supplier_id, p.po_date, p.status] for p in pos))
+            pos = session.scalars(select(PurchaseOrder).options(selectinload(PurchaseOrder.items).selectinload(PurchaseOrderItem.saree), selectinload(PurchaseOrder.supplier)).order_by(PurchaseOrder.po_id.desc()))
+            rows = []
+            for po in pos:
+                for item in po.items:
+                    rows.append([po.po_id, po.po_number, po.supplier.supplier_name, po.po_date, po.expected_date, po.status, item.saree.saree_code, item.saree.saree_name, item.ordered_qty, item.rate, item.amount, po.remarks])
+                if not po.items:
+                    rows.append([po.po_id, po.po_number, po.supplier.supplier_name, po.po_date, po.expected_date, po.status, "", "", "", "", "", po.remarks])
+            fill_table(self.table, rows)
         self.recalculate()
 
     def recalculate(self) -> None:
         self.amount.setText(f"{self.quantity.value() * self.rate.value():,.2f}")
 
     def load_selected(self, row: int, _column: int) -> None:
-        self.selected_po_id = int(self.table.item(row, 0).text()); self.status.setCurrentText(self.table.item(row, 4).text()); self.save_button.setText("Update PO Status")
+        self.selected_po_id = int(self.table.item(row, 0).text()); self.status.setCurrentText(self.table.item(row, 5).text()); self.remarks.setText(self.table.item(row, 11).text()); self.save_button.setText("Update PO Status")
 
     def clear_form(self) -> None:
         self.selected_po_id = None; self.remarks.clear(); self.status.setCurrentText("OPEN"); self.save_button.setText("Create PO")

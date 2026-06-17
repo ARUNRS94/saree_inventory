@@ -28,6 +28,15 @@ class Supplier(TimestampMixin, Base):
     purchase_orders: Mapped[list["PurchaseOrder"]] = relationship(back_populates="supplier")
 
 
+class VendorProcessType(TimestampMixin, Base):
+    __tablename__ = "vendor_process_types"
+    __table_args__ = (UniqueConstraint("process_type", name="uq_vendor_process_type"),)
+
+    process_type_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    process_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    is_active: Mapped[bool] = mapped_column(default=True)
+
+
 class Vendor(TimestampMixin, Base):
     __tablename__ = "vendors"
 

@@ -51,9 +51,11 @@ class MainWindow(QMainWindow):
             action = toolbar.addAction(label)
             action.triggered.connect(lambda _checked=False, page=index: self._show_page(page))
         toolbar.addSeparator()
-        light = toolbar.addAction("Light Theme")
+        light = toolbar.addAction("☀")
+        light.setToolTip("Light Theme")
         light.triggered.connect(self.apply_light_theme)
-        dark = toolbar.addAction("Dark Theme")
+        dark = toolbar.addAction("🌙")
+        dark.setToolTip("Dark Theme")
         dark.triggered.connect(self.apply_dark_theme)
         self.addToolBar(Qt.ToolBarArea.LeftToolBarArea, toolbar)
 
