@@ -19,6 +19,7 @@ class PurchaseLine:
     quantity: int
     rate: Decimal
     stock_out_saree_id: int | None = None
+    target_fg_saree_id: int | None = None
 
 
 class PurchaseService:
@@ -59,6 +60,9 @@ class PurchaseService:
                     raise ValueError("Sub vendor purchase orders can stock in only Sub process items.")
                 if line.stock_out_saree_id is None:
                     raise ValueError("Select the RM stock-out item for Sub vendor process orders.")
+                target_fg_item = self.session.get(Saree, line.target_fg_saree_id) if line.target_fg_saree_id else None
+                if target_fg_item is None or target_fg_item.fabric != "FG":
+                    raise ValueError("Select the target FG item for Sub vendor process orders.")
                 self.inventory.assert_available(line.stock_out_saree_id, line.quantity)
                 self.inventory.post_ledger(
                     transaction_date=document_date,
@@ -82,6 +86,7 @@ class PurchaseService:
                 PurchaseOrderItem(
                     saree_id=line.saree_id,
                     stock_out_saree_id=line.stock_out_saree_id,
+                    target_fg_saree_id=line.target_fg_saree_id,
                     ordered_qty=line.quantity,
                     rate=line.rate,
                     amount=line.rate * line.quantity,
@@ -112,8 +117,11 @@ class PurchaseService:
                 raise ValueError("Received or damaged quantity is required.")
             if po.supplier.contact_type == "Sub vendor":
                 fg_item = self.session.get(Saree, saree_id)
+                allowed_fg_ids = {item.target_fg_saree_id for item in po.items if item.target_fg_saree_id is not None}
                 if fg_item is None or fg_item.fabric != "FG":
                     raise ValueError("Sub vendor GRN stock-in item must be an FG item.")
+                if allowed_fg_ids and saree_id not in allowed_fg_ids:
+                    raise ValueError("GRN stock-in FG must match the FG selected on the Sub vendor PO.")
                 pending = self.pending_po_qty(po_id)
             else:
                 stock_in_item = self.session.get(Saree, saree_id)
@@ -188,6 +196,49 @@ class PurchaseService:
         if remaining > 0:
             raise ValueError("Insufficient WIP stock to complete the Sub vendor GRN.")
 
+    def cancel_po(self, po_id: int, cancel_date: date | None = None, remarks: str | None = None) -> PurchaseOrder:
+        po = self.session.get(PurchaseOrder, po_id)
+        if po is None:
+            raise ValueError("Purchase order not found.")
+        if po.status == "CANCELLED":
+            raise ValueError("Purchase order is already cancelled.")
+        received = int(
+            self.session.scalar(
+                select(func.coalesce(func.sum(GRNItem.received_qty + GRNItem.damaged_qty), 0))
+                .join(GRN)
+                .where(GRN.po_id == po.po_id)
+            ) or 0
+        )
+        if received > 0:
+            raise ValueError("Cannot cancel a PO after GRN quantity has been received.")
+        document_date = cancel_date or date.today()
+        if po.supplier.contact_type == "Sub vendor":
+            for item in po.items:
+                if item.stock_out_saree_id is not None:
+                    self.inventory.post_ledger(
+                        transaction_date=document_date,
+                        transaction_type="SUB_VENDOR_ISSUE_CANCEL",
+                        reference_no=po.po_number,
+                        saree_id=item.stock_out_saree_id,
+                        qty_in=item.ordered_qty,
+                        rate=item.rate,
+                        remarks=remarks or po.remarks,
+                    )
+                self.inventory.assert_available(item.saree_id, item.ordered_qty)
+                self.inventory.post_ledger(
+                    transaction_date=document_date,
+                    transaction_type="WIP_STOCK_CANCEL",
+                    reference_no=po.po_number,
+                    saree_id=item.saree_id,
+                    qty_out=item.ordered_qty,
+                    rate=item.rate,
+                    remarks=remarks or po.remarks,
+                )
+        po.status = "CANCELLED"
+        if remarks:
+            po.remarks = remarks
+        return po
+
     def _update_po_status(self, po: PurchaseOrder) -> None:
         ordered = sum(item.ordered_qty for item in po.items)
         received = int(
@@ -197,4 +248,5 @@ class PurchaseService:
                 .where(GRN.po_id == po.po_id)
             ) or 0
         )
-        po.status = "CLOSED" if received >= ordered else "PARTIAL" if received > 0 else "OPEN"
+        if po.status != "CANCELLED":
+            po.status = "CLOSED" if received >= ordered else "PARTIAL" if received > 0 else "OPEN"

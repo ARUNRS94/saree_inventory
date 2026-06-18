@@ -87,6 +87,7 @@ class PurchaseOrderItem(Base):
     po_id: Mapped[int] = mapped_column(ForeignKey("purchase_orders.po_id"), nullable=False)
     saree_id: Mapped[int] = mapped_column(ForeignKey("sarees.saree_id"), nullable=False)
     stock_out_saree_id: Mapped[int | None] = mapped_column(ForeignKey("sarees.saree_id"))
+    target_fg_saree_id: Mapped[int | None] = mapped_column(ForeignKey("sarees.saree_id"))
     ordered_qty: Mapped[int] = mapped_column(Integer, nullable=False)
     rate: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
@@ -94,6 +95,7 @@ class PurchaseOrderItem(Base):
     purchase_order: Mapped[PurchaseOrder] = relationship(back_populates="items")
     saree: Mapped[Saree] = relationship(foreign_keys=[saree_id])
     stock_out_saree: Mapped[Saree | None] = relationship(foreign_keys=[stock_out_saree_id])
+    target_fg_saree: Mapped[Saree | None] = relationship(foreign_keys=[target_fg_saree_id])
 
 
 class GRN(Base):

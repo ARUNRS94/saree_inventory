@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from PySide6.QtWidgets import QComboBox, QDoubleSpinBox, QFormLayout, QLabel, QPushButton, QSpinBox
+from PySide6.QtWidgets import QComboBox, QDoubleSpinBox, QFormLayout, QLabel, QMessageBox, QPushButton, QSpinBox
 from sqlalchemy import select
 
 from database.database import session_scope
@@ -38,7 +38,7 @@ class GrnPage(Page):
 
     def refresh(self) -> None:
         with session_scope() as session:
-            populate_combo(self.po, [(p.po_id, f"{p.po_number} - {p.supplier.supplier_name} ({p.supplier.contact_type})") for p in session.scalars(select(PurchaseOrder).where(PurchaseOrder.status != "CLOSED").order_by(PurchaseOrder.po_id.desc()))])
+            populate_combo(self.po, [(p.po_id, f"{p.po_number} - {p.supplier.supplier_name} ({p.supplier.contact_type})") for p in session.scalars(select(PurchaseOrder).where(PurchaseOrder.status.not_in(["CLOSED", "CANCELLED"])).order_by(PurchaseOrder.po_id.desc()))])
         self.update_stock_in_items()
 
     def update_stock_in_items(self) -> None:
@@ -51,7 +51,8 @@ class GrnPage(Page):
             if po is None:
                 rows = []
             elif po.supplier.contact_type == "Sub vendor":
-                rows = [(s.saree_id, f"{s.saree_code} - {s.saree_name} (FG)") for s in session.scalars(select(Saree).where(Saree.fabric == "FG").order_by(Saree.saree_code))]
+                target_ids = [item.target_fg_saree_id for item in po.items if item.target_fg_saree_id is not None]
+                rows = [(s.saree_id, f"{s.saree_code} - {s.saree_name} (FG)") for s in session.scalars(select(Saree).where(Saree.saree_id.in_(target_ids)).order_by(Saree.saree_code))] if target_ids else []
             else:
                 rows = [(item.saree_id, f"{item.saree.saree_code} - {item.saree.saree_name} (RM)") for item in po.items]
         populate_combo(self.saree, rows)
@@ -80,6 +81,8 @@ class GrnPage(Page):
         try:
             if self.po.currentData() is None or self.saree.currentData() is None:
                 raise ValueError("Create an open PO and saree before saving a GRN.")
+            if not self.confirm("Save GRN", "Save this GRN and post stock movements?"):
+                return
             with session_scope() as session:
                 grn = PurchaseService(session).receive_grn(
                     int(self.po.currentData()),
@@ -90,3 +93,6 @@ class GrnPage(Page):
             self.refresh()
         except Exception as exc:
             self.error(str(exc))
+
+    def confirm(self, title: str, message: str) -> bool:
+        return QMessageBox.question(self, title, message, QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == QMessageBox.Yes

@@ -48,8 +48,11 @@ def _run_lightweight_migrations() -> None:
         if "contact_type" not in supplier_columns:
             connection.execute(text("ALTER TABLE suppliers ADD COLUMN contact_type VARCHAR(30) DEFAULT 'RM vendor'"))
         item_columns = {column["name"] for column in inspector.get_columns("sarees")}
-        if "stock_out_saree_id" not in {column["name"] for column in inspector.get_columns("purchase_order_items")}:
+        po_item_columns = {column["name"] for column in inspector.get_columns("purchase_order_items")}
+        if "stock_out_saree_id" not in po_item_columns:
             connection.execute(text("ALTER TABLE purchase_order_items ADD COLUMN stock_out_saree_id INTEGER"))
+        if "target_fg_saree_id" not in po_item_columns:
+            connection.execute(text("ALTER TABLE purchase_order_items ADD COLUMN target_fg_saree_id INTEGER"))
         connection.execute(text("UPDATE suppliers SET contact_type = 'RM vendor' WHERE contact_type IS NULL OR contact_type = ''"))
         connection.execute(text(
             "INSERT INTO suppliers (supplier_name, contact_person, phone, gst_no, address, contact_type, is_active) "
