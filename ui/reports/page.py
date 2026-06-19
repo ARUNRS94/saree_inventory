@@ -1,10 +1,11 @@
 """Reports UI for stock, purchases, vendor WIP and valuation."""
 from __future__ import annotations
 
+import csv
 from decimal import Decimal
 
 from sqlalchemy import func, select
-from PySide6.QtWidgets import QComboBox, QGridLayout, QLabel, QTabWidget, QTableWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QComboBox, QFileDialog, QGridLayout, QLabel, QPushButton, QTabWidget, QTableWidget, QVBoxLayout, QWidget
 
 from database.database import session_scope
 from database.models.entities import GRN, GRNItem, PurchaseOrder, PurchaseOrderItem, Saree, StockLedger, Supplier
@@ -21,6 +22,7 @@ class ReportsPage(Page):
         self.vendor_filter.currentIndexChanged.connect(self.refresh)
         self.layout.addWidget(QLabel("Vendor/Customer Filter"))
         self.layout.addWidget(self.vendor_filter)
+        download = QPushButton("Download Current Report CSV"); download.clicked.connect(self.download_current_report); self.layout.addWidget(download)
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(False)
         self.layout.addWidget(self.tabs)
@@ -140,3 +142,20 @@ class ReportsPage(Page):
         for _saree_id, code, name, stock, rate, value in inventory.inventory_valuation_rows():
             rows.append([f"{code} - {name}", stock, rate, value])
         return rows
+
+
+    def download_current_report(self) -> None:
+        table = self.tabs.currentWidget().findChild(QTableWidget) if self.tabs.currentWidget() else None
+        if table is None:
+            self.error("No report selected for download.")
+            return
+        report_name = self.tabs.tabText(self.tabs.currentIndex()).lower().replace(" ", "_")
+        path, _ = QFileDialog.getSaveFileName(self, "Download Report", f"{report_name}.csv", "CSV Files (*.csv)")
+        if not path:
+            return
+        with open(path, "w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle)
+            writer.writerow([table.horizontalHeaderItem(column).text() for column in range(table.columnCount())])
+            for row in range(table.rowCount()):
+                writer.writerow([table.item(row, column).text() if table.item(row, column) else "" for column in range(table.columnCount())])
+        self.info("Report downloaded successfully.")
