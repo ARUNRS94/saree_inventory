@@ -1,7 +1,9 @@
 """Contact master UI for RM vendors, Sub vendors and Customers."""
 from __future__ import annotations
 
-from PySide6.QtWidgets import QComboBox, QFormLayout, QHBoxLayout, QLineEdit, QPushButton, QTableWidget, QTextEdit
+import csv
+
+from PySide6.QtWidgets import QComboBox, QFileDialog, QFormLayout, QHBoxLayout, QLineEdit, QPushButton, QTableWidget, QTextEdit
 
 from database.database import session_scope
 from database.models.entities import Supplier
@@ -20,7 +22,9 @@ class SupplierPage(Page):
         buttons = QHBoxLayout()
         self.save_button = QPushButton("Add Contact"); self.save_button.clicked.connect(self.save)
         clear = QPushButton("Clear"); clear.clicked.connect(self.clear_form)
-        buttons.addWidget(self.save_button); buttons.addWidget(clear); form.addRow(buttons)
+        export = QPushButton("Export CSV"); export.clicked.connect(self.export_csv)
+        import_button = QPushButton("Import CSV"); import_button.clicked.connect(self.import_csv)
+        buttons.addWidget(self.save_button); buttons.addWidget(clear); buttons.addWidget(export); buttons.addWidget(import_button); form.addRow(buttons)
         self.layout.addLayout(form)
         self.table = QTableWidget(0, 7)
         self.table.setHorizontalHeaderLabels(["ID", "Name", "Type", "Contact", "Phone", "GST", "Address"])
@@ -65,3 +69,37 @@ class SupplierPage(Page):
         with session_scope() as session:
             rows = ([s.supplier_id, s.supplier_name, s.contact_type, s.contact_person, s.phone, s.gst_no, s.address] for s in MasterDataService(session).search_contacts())
             fill_table(self.table, rows)
+
+
+    def export_csv(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(self, "Export Contact Master", "contact_master.csv", "CSV Files (*.csv)")
+        if not path:
+            return
+        with session_scope() as session, open(path, "w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["name", "type", "contact_person", "phone", "gst_no", "address"])
+            for contact in MasterDataService(session).search_contacts():
+                writer.writerow([contact.supplier_name, contact.contact_type, contact.contact_person, contact.phone, contact.gst_no, contact.address])
+        self.info("Contact master exported successfully.")
+
+    def import_csv(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Import Contact Master", "", "CSV Files (*.csv)")
+        if not path:
+            return
+        try:
+            with session_scope() as session, open(path, newline="", encoding="utf-8-sig") as handle:
+                service = MasterDataService(session)
+                for row in csv.DictReader(handle):
+                    name = (row.get("name") or row.get("Name") or "").strip()
+                    contact_type = (row.get("type") or row.get("Type") or "RM vendor").strip() or "RM vendor"
+                    if not name:
+                        continue
+                    existing = session.query(Supplier).filter(Supplier.supplier_name == name).one_or_none()
+                    values = {"contact_person": row.get("contact_person") or row.get("Contact"), "phone": row.get("phone") or row.get("Phone"), "gst_no": row.get("gst_no") or row.get("GST"), "address": row.get("address") or row.get("Address")}
+                    if existing is None:
+                        service.create_contact(name, contact_type, **values)
+                    else:
+                        existing.contact_type = contact_type; existing.contact_person = values["contact_person"]; existing.phone = values["phone"]; existing.gst_no = values["gst_no"]; existing.address = values["address"]
+            self.info("Contact master imported successfully."); self.refresh()
+        except Exception as exc:
+            self.error(str(exc))

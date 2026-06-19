@@ -18,7 +18,7 @@ class PurchaseOrderPage(Page):
         super().__init__("Purchase Orders")
         self.selected_po_id: int | None = None
         form = QFormLayout(); self.supplier = QComboBox(); self.stock_out_item = QComboBox(); self.saree = QComboBox(); self.target_fg = QComboBox(); self.quantity = QSpinBox(); self.quantity.setRange(1, 100000); self.rate = QDoubleSpinBox(); self.rate.setRange(0, 10000000); self.rate.setDecimals(2); self.amount = QLabel("0.00"); self.status = QComboBox(); self.status.addItems(["OPEN", "PARTIAL", "CLOSED"]); self.remarks = QLineEdit()
-        form.addRow("RM/Sub Vendor", self.supplier); form.addRow("Stock Out Item (RM, for Sub vendor)", self.stock_out_item); form.addRow("Stock In Item", self.saree); form.addRow("Target FG (for Sub vendor GRN)", self.target_fg); form.addRow("Quantity", self.quantity); form.addRow("Rate / Process Charges", self.rate); form.addRow("Amount", self.amount); form.addRow("Status", self.status); form.addRow("Remarks", self.remarks)
+        form.addRow("RM/Sub Vendor", self.supplier); form.addRow("Stock Out Item (RM/FG, for Sub vendor)", self.stock_out_item); form.addRow("Stock In Item", self.saree); form.addRow("Target FG (for Sub vendor GRN)", self.target_fg); form.addRow("Quantity", self.quantity); form.addRow("Rate / Process Charges", self.rate); form.addRow("Amount", self.amount); form.addRow("Status", self.status); form.addRow("Remarks", self.remarks)
         buttons = QHBoxLayout(); self.save_button = QPushButton("Create PO"); self.save_button.clicked.connect(self.save); self.cancel_button = QPushButton("Cancel PO"); self.cancel_button.clicked.connect(self.cancel_po); self.cancel_button.setEnabled(False); clear = QPushButton("Clear"); clear.clicked.connect(self.clear_form); buttons.addWidget(self.save_button); buttons.addWidget(self.cancel_button); buttons.addWidget(clear); form.addRow(buttons)
         self.layout.addLayout(form)
         self.table = QTableWidget(0, 16)
@@ -30,7 +30,7 @@ class PurchaseOrderPage(Page):
         with session_scope() as session:
             contacts = session.scalars(select(Supplier).where(Supplier.contact_type.in_(["RM vendor", "Sub vendor"])).order_by(Supplier.supplier_name))
             populate_combo(self.supplier, [(s.supplier_id, f"{s.supplier_name} ({s.contact_type})") for s in contacts])
-            populate_combo(self.stock_out_item, [(s.saree_id, f"{s.saree_code} - {s.saree_name}") for s in session.scalars(select(Saree).where(Saree.fabric == "RM").order_by(Saree.saree_code))])
+            populate_combo(self.stock_out_item, [(s.saree_id, f"{s.saree_code} - {s.saree_name} ({s.fabric})") for s in session.scalars(select(Saree).where(Saree.fabric.in_(["RM", "FG"])).order_by(Saree.fabric, Saree.saree_code))])
             populate_combo(self.target_fg, [(s.saree_id, f"{s.saree_code} - {s.saree_name}") for s in session.scalars(select(Saree).where(Saree.fabric == "FG").order_by(Saree.saree_code))])
             self._populate_stock_in_items(session)
             pos = session.scalars(select(PurchaseOrder).options(selectinload(PurchaseOrder.items).selectinload(PurchaseOrderItem.saree), selectinload(PurchaseOrder.items).selectinload(PurchaseOrderItem.stock_out_saree), selectinload(PurchaseOrder.items).selectinload(PurchaseOrderItem.target_fg_saree), selectinload(PurchaseOrder.supplier)).order_by(PurchaseOrder.po_id.desc()))
@@ -97,7 +97,7 @@ class PurchaseOrderPage(Page):
         try:
             if self.selected_po_id is None:
                 raise ValueError("Select a purchase order to cancel.")
-            if not self.confirm("Cancel Purchase Order", "Cancel this PO and reverse any Sub vendor WIP/RM issue stock movements?"):
+            if not self.confirm("Cancel Purchase Order", "Cancel this PO and reverse any Sub vendor WIP/stock issue movements?"):
                 return
             with session_scope() as session:
                 po = PurchaseService(session).cancel_po(self.selected_po_id, remarks=self.remarks.text())

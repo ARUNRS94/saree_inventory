@@ -59,10 +59,13 @@ class PurchaseService:
                 if stock_in_item.fabric != "Sub process":
                     raise ValueError("Sub vendor purchase orders can stock in only Sub process items.")
                 if line.stock_out_saree_id is None:
-                    raise ValueError("Select the RM stock-out item for Sub vendor process orders.")
+                    raise ValueError("Select the RM or FG stock-out item for Sub vendor process orders.")
                 target_fg_item = self.session.get(Saree, line.target_fg_saree_id) if line.target_fg_saree_id else None
                 if target_fg_item is None or target_fg_item.fabric != "FG":
                     raise ValueError("Select the target FG item for Sub vendor process orders.")
+                stock_out_item = self.session.get(Saree, line.stock_out_saree_id)
+                if stock_out_item is None or stock_out_item.fabric not in {"RM", "FG"}:
+                    raise ValueError("Sub vendor stock-out item must be an RM or FG item.")
                 self.inventory.assert_available(line.stock_out_saree_id, line.quantity)
                 self.inventory.post_ledger(
                     transaction_date=document_date,
