@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from database.database import session_scope
 from database.models.entities import PurchaseOrder, PurchaseOrderItem, Saree, Supplier
+from database.repositories.inventory import InventoryRepository
 from services.purchase_service import PurchaseLine, PurchaseService
 from ui.common import Page, fill_table, populate_combo
 
@@ -17,20 +18,20 @@ class PurchaseOrderPage(Page):
     def __init__(self) -> None:
         super().__init__("Purchase Orders")
         self.selected_po_id: int | None = None
-        form = QFormLayout(); self.supplier = QComboBox(); self.stock_out_item = QComboBox(); self.saree = QComboBox(); self.target_fg = QComboBox(); self.quantity = QSpinBox(); self.quantity.setRange(1, 100000); self.rate = QDoubleSpinBox(); self.rate.setRange(0, 10000000); self.rate.setDecimals(2); self.amount = QLabel("0.00"); self.status = QComboBox(); self.status.addItems(["OPEN", "PARTIAL", "CLOSED"]); self.remarks = QLineEdit()
-        form.addRow("RM/Sub Vendor", self.supplier); form.addRow("Stock Out Item (RM, for Sub vendor)", self.stock_out_item); form.addRow("Stock In Item", self.saree); form.addRow("Target FG (for Sub vendor GRN)", self.target_fg); form.addRow("Quantity", self.quantity); form.addRow("Rate / Process Charges", self.rate); form.addRow("Amount", self.amount); form.addRow("Status", self.status); form.addRow("Remarks", self.remarks)
+        form = QFormLayout(); self.supplier = QComboBox(); self.stock_out_item = QComboBox(); self.stock_out_stock = QLabel("-"); self.saree = QComboBox(); self.target_fg = QComboBox(); self.quantity = QSpinBox(); self.quantity.setRange(1, 100000); self.rate = QDoubleSpinBox(); self.rate.setRange(0, 10000000); self.rate.setDecimals(2); self.amount = QLabel("0.00"); self.status = QComboBox(); self.status.addItems(["OPEN", "PARTIAL", "CLOSED"]); self.remarks = QLineEdit()
+        form.addRow("RM/Sub Vendor", self.supplier); form.addRow("Stock Out Item (RM/FG, for Sub vendor)", self.stock_out_item); form.addRow("Available Stock", self.stock_out_stock); form.addRow("Stock In Item", self.saree); form.addRow("Target FG (for Sub vendor GRN)", self.target_fg); form.addRow("Quantity", self.quantity); form.addRow("Rate / Process Charges", self.rate); form.addRow("Amount", self.amount); form.addRow("Status", self.status); form.addRow("Remarks", self.remarks)
         buttons = QHBoxLayout(); self.save_button = QPushButton("Create PO"); self.save_button.clicked.connect(self.save); self.cancel_button = QPushButton("Cancel PO"); self.cancel_button.clicked.connect(self.cancel_po); self.cancel_button.setEnabled(False); clear = QPushButton("Clear"); clear.clicked.connect(self.clear_form); buttons.addWidget(self.save_button); buttons.addWidget(self.cancel_button); buttons.addWidget(clear); form.addRow(buttons)
         self.layout.addLayout(form)
         self.table = QTableWidget(0, 16)
         self.table.setHorizontalHeaderLabels(["PO ID", "PO No", "Contact", "Type", "PO Date", "Expected", "Stock Out", "Stock In Code", "Stock In Name", "Target FG Code", "Target FG Name", "Ordered Qty", "Rate/Charges", "Amount", "Remarks", "Status"])
         self.table.setColumnHidden(0, True); self.table.setSortingEnabled(True); self.table.cellDoubleClicked.connect(self.load_selected); self.layout.addWidget(self.table)
-        self.quantity.valueChanged.connect(self.recalculate); self.rate.valueChanged.connect(self.recalculate); self.supplier.currentIndexChanged.connect(self.update_contact_mode); self.refresh()
+        self.quantity.valueChanged.connect(self.recalculate); self.rate.valueChanged.connect(self.recalculate); self.supplier.currentIndexChanged.connect(self.update_contact_mode); self.stock_out_item.currentIndexChanged.connect(self.update_stock_out_stock); self.refresh()
 
     def refresh(self) -> None:
         with session_scope() as session:
             contacts = session.scalars(select(Supplier).where(Supplier.contact_type.in_(["RM vendor", "Sub vendor"])).order_by(Supplier.supplier_name))
             populate_combo(self.supplier, [(s.supplier_id, f"{s.supplier_name} ({s.contact_type})") for s in contacts])
-            populate_combo(self.stock_out_item, [(s.saree_id, f"{s.saree_code} - {s.saree_name}") for s in session.scalars(select(Saree).where(Saree.fabric == "RM").order_by(Saree.saree_code))])
+            populate_combo(self.stock_out_item, [(s.saree_id, f"{s.saree_code} - {s.saree_name} ({s.fabric})") for s in session.scalars(select(Saree).where(Saree.fabric.in_(["RM", "FG"])).order_by(Saree.fabric, Saree.saree_code))])
             populate_combo(self.target_fg, [(s.saree_id, f"{s.saree_code} - {s.saree_name}") for s in session.scalars(select(Saree).where(Saree.fabric == "FG").order_by(Saree.saree_code))])
             self._populate_stock_in_items(session)
             pos = session.scalars(select(PurchaseOrder).options(selectinload(PurchaseOrder.items).selectinload(PurchaseOrderItem.saree), selectinload(PurchaseOrder.items).selectinload(PurchaseOrderItem.stock_out_saree), selectinload(PurchaseOrder.items).selectinload(PurchaseOrderItem.target_fg_saree), selectinload(PurchaseOrder.supplier)).order_by(PurchaseOrder.po_id.desc()))
@@ -44,7 +45,7 @@ class PurchaseOrderPage(Page):
                 if not po.items:
                     rows.append([po.po_id, po.po_number, po.supplier.supplier_name, po.supplier.contact_type, po.po_date, po.expected_date, "", "", "", "", "", "", "", "", po.remarks, po.status])
             fill_table(self.table, rows)
-        self.update_contact_mode(); self.recalculate()
+        self.update_contact_mode(); self.update_stock_out_stock(); self.recalculate()
 
     def selected_contact_type(self) -> str:
         text = self.supplier.currentText()
@@ -60,6 +61,15 @@ class PurchaseOrderPage(Page):
         self.target_fg.setEnabled(is_sub_vendor)
         with session_scope() as session:
             self._populate_stock_in_items(session)
+        self.update_stock_out_stock()
+
+    def update_stock_out_stock(self) -> None:
+        if self.selected_contact_type() != "Sub vendor" or self.stock_out_item.currentData() is None:
+            self.stock_out_stock.setText("-")
+            return
+        with session_scope() as session:
+            stock = InventoryRepository(session).current_stock(int(self.stock_out_item.currentData()))
+        self.stock_out_stock.setText(f"{stock} pcs")
 
     def recalculate(self) -> None:
         self.amount.setText(f"{self.quantity.value() * self.rate.value():,.2f}")
@@ -97,7 +107,7 @@ class PurchaseOrderPage(Page):
         try:
             if self.selected_po_id is None:
                 raise ValueError("Select a purchase order to cancel.")
-            if not self.confirm("Cancel Purchase Order", "Cancel this PO and reverse any Sub vendor WIP/RM issue stock movements?"):
+            if not self.confirm("Cancel Purchase Order", "Cancel this PO and reverse any Sub vendor WIP/stock issue movements?"):
                 return
             with session_scope() as session:
                 po = PurchaseService(session).cancel_po(self.selected_po_id, remarks=self.remarks.text())
