@@ -33,7 +33,7 @@ async def lifespan(app: FastAPI):
     import app.models  # noqa: F401  (register all mappers)
 
     # Alembic owns the schema everywhere except local SQLite development.
-    if settings.DATABASE_URL.startswith("sqlite"):
+    if settings.is_sqlite:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
 

@@ -1,6 +1,32 @@
 from __future__ import annotations
 
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
 from pydantic_settings import BaseSettings
+
+# asyncpg rejects these libpq-only connection parameters.
+_LIBPQ_ONLY_PARAMS = {"channel_binding", "sslmode", "connect_timeout", "target_session_attrs"}
+
+
+def _rewrite_pg_url(url: str, driver: str) -> str:
+    """Point a Postgres URL at the given driver, translating params the driver can't take."""
+    if not url or url.startswith("sqlite"):
+        return url
+    parts = urlsplit(url)
+    if not parts.scheme.startswith(("postgres", "postgresql")):
+        return url
+
+    params = parse_qsl(parts.query, keep_blank_values=True)
+    if driver == "asyncpg":
+        rewritten = []
+        for key, value in params:
+            if key not in _LIBPQ_ONLY_PARAMS:
+                rewritten.append((key, value))
+            elif key == "sslmode":
+                rewritten.append(("ssl", "disable" if value == "disable" else "require"))
+        params = rewritten
+
+    return urlunsplit((f"postgresql+{driver}", parts.netloc, parts.path, urlencode(params), parts.fragment))
 
 
 class Settings(BaseSettings):
@@ -44,10 +70,30 @@ class Settings(BaseSettings):
         return [d.strip().lower() for d in self.GOOGLE_ALLOWED_DOMAINS.split(",") if d.strip()]
 
     @property
+    def is_sqlite(self) -> bool:
+        return self.DATABASE_URL.startswith("sqlite")
+
+    @property
+    def async_database_url(self) -> str:
+        """Runtime URL, accepting the raw libpq string that Neon and Vercel hand out."""
+        return _rewrite_pg_url(self.DATABASE_URL, "asyncpg")
+
+    @property
     def sync_database_url(self) -> str:
+        """Alembic URL. psycopg2 understands libpq parameters, so they are left intact."""
         if self.DATABASE_URL_SYNC:
-            return self.DATABASE_URL_SYNC
-        return self.DATABASE_URL.replace("+asyncpg", "+psycopg2").replace("+aiosqlite", "")
+            return _rewrite_pg_url(self.DATABASE_URL_SYNC, "psycopg2")
+        if self.is_sqlite:
+            return self.DATABASE_URL.replace("+aiosqlite", "")
+        return _rewrite_pg_url(self.DATABASE_URL, "psycopg2")
+
+    @property
+    def disable_prepared_statements(self) -> bool:
+        """Transaction-mode poolers break asyncpg's prepared statements."""
+        if self.DB_DISABLE_PREPARED_STATEMENTS:
+            return True
+        host = urlsplit(self.DATABASE_URL).hostname or ""
+        return "-pooler." in host or "pgbouncer" in self.DATABASE_URL
 
 
 settings = Settings()

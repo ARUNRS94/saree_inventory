@@ -7,13 +7,13 @@ from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import settings
 
-_is_sqlite = settings.DATABASE_URL.startswith("sqlite")
+_is_sqlite = settings.is_sqlite
 
 if _is_sqlite:
     _connect_args: dict = {"check_same_thread": False}
     _engine_kwargs: dict = {}
 else:
-    _connect_args = {"statement_cache_size": 0} if settings.DB_DISABLE_PREPARED_STATEMENTS else {}
+    _connect_args = {"statement_cache_size": 0} if settings.disable_prepared_statements else {}
     _engine_kwargs = {
         "pool_size": settings.DB_POOL_SIZE,
         "max_overflow": settings.DB_MAX_OVERFLOW,
@@ -22,7 +22,7 @@ else:
     }
 
 engine = create_async_engine(
-    settings.DATABASE_URL, echo=False, future=True, connect_args=_connect_args, **_engine_kwargs
+    settings.async_database_url, echo=False, future=True, connect_args=_connect_args, **_engine_kwargs
 )
 async_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
