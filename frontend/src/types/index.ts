@@ -1,9 +1,15 @@
 export interface User {
   user_id: number;
   username: string;
+  email: string | null;
   full_name: string;
   role: string;
+  role_id: number | null;
+  permissions: string[];
+  auth_provider: string;
+  avatar_url: string | null;
   is_active: boolean;
+  last_login_at: string | null;
 }
 
 export interface TokenResponse {
@@ -13,10 +19,30 @@ export interface TokenResponse {
   user?: User;
 }
 
-export interface RoleInfo {
-  role: string;
+export interface AuthProviders {
+  google_enabled: boolean;
+  google_client_id: string | null;
+  signup_enabled: boolean;
+}
+
+export interface Permission {
+  permission_id: number;
+  code: string;
+  name: string;
+  description: string | null;
+}
+
+export interface Role {
+  role_id: number;
+  role_name: string;
+  description: string | null;
+  is_system: boolean;
+  is_active: boolean;
   permissions: string[];
 }
+
+/** @deprecated use Role */
+export type RoleInfo = Role;
 
 export interface Saree {
   saree_id: number;

@@ -17,7 +17,9 @@ def hash_password(password: str) -> str:
     return ph.hash(password)
 
 
-def verify_password(plain: str, hashed: str) -> bool:
+def verify_password(plain: str, hashed: str | None) -> bool:
+    if not hashed:
+        return False
     try:
         return ph.verify(hashed, plain)
     except VerifyMismatchError:

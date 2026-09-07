@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import api from '@/services/api';
-import type { User, RoleInfo } from '@/types';
+import type { Role, User } from '@/types';
 import { PageHeader } from '@/components/PageHeader';
 import { DataTable } from '@/components/DataTable';
 import { StatusBadge } from '@/components/StatusBadge';
@@ -8,15 +8,17 @@ import { LoadingState, EmptyState } from '@/components/LoadingState';
 import { useConfirmDialog } from '@/components/ConfirmDialog';
 import { useAuth } from '@/contexts/AuthContext';
 
+const EMPTY_FORM = { username: '', email: '', full_name: '', password: '', role: 'viewer' };
+
 export default function UsersPage() {
-  const { user: currentUser } = useAuth();
+  const { user: currentUser, can } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
-  const [roles, setRoles] = useState<RoleInfo[]>([]);
+  const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<User | null>(null);
   const [showPasswordForm, setShowPasswordForm] = useState<User | null>(null);
-  const [form, setForm] = useState({ username: '', full_name: '', password: '', role: 'viewer' });
+  const [form, setForm] = useState(EMPTY_FORM);
   const [newPassword, setNewPassword] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -36,14 +38,14 @@ export default function UsersPage() {
 
   const openNew = () => {
     setEditing(null);
-    setForm({ username: '', full_name: '', password: '', role: 'viewer' });
+    setForm(EMPTY_FORM);
     setShowForm(true);
     setError('');
   };
 
   const openEdit = (u: User) => {
     setEditing(u);
-    setForm({ username: u.username, full_name: u.full_name, password: '', role: u.role });
+    setForm({ username: u.username, email: u.email || '', full_name: u.full_name, password: '', role: u.role });
     setShowForm(true);
     setError('');
   };
@@ -53,10 +55,10 @@ export default function UsersPage() {
     setSaving(true); setError(''); setSuccess('');
     try {
       if (editing) {
-        await api.put(`/auth/users/${editing.user_id}`, { full_name: form.full_name, role: form.role });
+        await api.put(`/auth/users/${editing.user_id}`, { full_name: form.full_name, email: form.email || null, role: form.role });
         setSuccess('User updated.');
       } else {
-        await api.post('/auth/users', form);
+        await api.post('/auth/users', { ...form, email: form.email || null });
         setSuccess('User created.');
       }
       setShowForm(false); load();
@@ -87,8 +89,8 @@ export default function UsersPage() {
     } finally { setSaving(false); }
   };
 
-  if (currentUser?.role !== 'admin') {
-    return <div className="text-center py-12 text-gray-500">Admin access required.</div>;
+  if (!can('users')) {
+    return <div className="text-center py-12 text-gray-500">You do not have access to user management.</div>;
   }
 
   const roleColors: Record<string, string> = {
@@ -113,9 +115,9 @@ export default function UsersPage() {
           <h3 className="text-sm font-semibold mb-3">Role Permissions</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             {roles.map((r) => (
-              <div key={r.role} className="border border-gray-200 rounded-lg p-3">
-                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold mb-2 ${roleColors[r.role] || 'bg-gray-100 text-gray-800'}`}>
-                  {r.role}
+              <div key={r.role_id} className="border border-gray-200 rounded-lg p-3">
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold mb-2 ${roleColors[r.role_name] || 'bg-gray-100 text-gray-800'}`}>
+                  {r.role_name}
                 </span>
                 <div className="flex flex-wrap gap-1 mt-1">
                   {r.permissions.map((p) => (
@@ -142,17 +144,21 @@ export default function UsersPage() {
               <label className="label">Full Name *</label>
               <input className="input" value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} required />
             </div>
+            <div>
+              <label className="label">Email</label>
+              <input className="input" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+            </div>
             {!editing && (
               <div>
                 <label className="label">Password *</label>
                 <input className="input" type="password" value={form.password}
-                  onChange={(e) => setForm({ ...form, password: e.target.value })} required minLength={6} />
+                  onChange={(e) => setForm({ ...form, password: e.target.value })} required minLength={8} />
               </div>
             )}
             <div>
               <label className="label">Role *</label>
               <select className="input" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
-                {roles.map((r) => <option key={r.role} value={r.role}>{r.role}</option>)}
+                {roles.filter((r) => r.is_active).map((r) => <option key={r.role_id} value={r.role_name}>{r.role_name}</option>)}
               </select>
             </div>
             <div className="sm:col-span-2 flex gap-2">
@@ -171,7 +177,7 @@ export default function UsersPage() {
             <div className="flex-1">
               <label className="label">New Password *</label>
               <input className="input" type="password" value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)} required minLength={6} />
+                onChange={(e) => setNewPassword(e.target.value)} required minLength={8} />
             </div>
             <button type="submit" className="btn-primary text-sm" disabled={saving}>{saving ? 'Resetting...' : 'Reset'}</button>
             <button type="button" className="btn-secondary text-sm" onClick={() => setShowPasswordForm(null)}>Cancel</button>
@@ -185,9 +191,13 @@ export default function UsersPage() {
           <DataTable keyField="user_id" data={users} columns={[
             { header: 'Username', accessor: 'username' },
             { header: 'Full Name', accessor: 'full_name' },
+            { header: 'Email', accessor: (u) => u.email || '—' },
+            { header: 'Sign-in', accessor: (u) => (
+              <span className="text-xs text-gray-600 capitalize">{u.auth_provider}</span>
+            )},
             { header: 'Role', accessor: (u) => (
               <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${roleColors[u.role] || 'bg-gray-100'}`}>
-                {u.role}
+                {u.role || '—'}
               </span>
             )},
             { header: 'Status', accessor: (u) => <StatusBadge status={u.is_active ? 'ACTIVE' : 'INACTIVE'} /> },

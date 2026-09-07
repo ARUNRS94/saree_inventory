@@ -6,7 +6,7 @@ import { FilterBar } from '@/components/FilterBar';
 import { DataTable, Pagination } from '@/components/DataTable';
 import { LoadingState, EmptyState } from '@/components/LoadingState';
 import { useConfirmDialog } from '@/components/ConfirmDialog';
-import { formatDate, formatCurrency } from '@/utils/format';
+import { formatDate } from '@/utils/format';
 
 export default function GRNPage() {
   const [data, setData] = useState<PaginatedResponse<GRN>>({ items: [], total: 0, page: 1, page_size: 50 });

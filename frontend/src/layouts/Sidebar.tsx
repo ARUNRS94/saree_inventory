@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Package, Users, Factory, ShoppingCart, ClipboardCheck, Wrench, BarChart3, Settings, X, Layers, Shield } from 'lucide-react';
+import { LayoutDashboard, Package, Users, Factory, ShoppingCart, ClipboardCheck, Wrench, BarChart3, Settings, X, Layers, Shield, KeyRound } from 'lucide-react';
 import clsx from 'clsx';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSettings } from '@/contexts/SettingsContext';
@@ -16,15 +16,18 @@ const links = [
   { to: '/reports', label: 'Reports', icon: BarChart3 },
 ];
 
+const adminLinks = [
+  { to: '/users', label: 'User Management', icon: Shield, permission: 'users' },
+  { to: '/access', label: 'Access Management', icon: KeyRound, permission: 'roles' },
+  { to: '/settings', label: 'Settings', icon: Settings, permission: 'settings' },
+];
+
 export function Sidebar({ onClose }: { onClose?: () => void }) {
-  const { user } = useAuth();
+  const { can } = useAuth();
   const { logo_url, company_name } = useSettings();
   const allLinks = [
     ...links,
-    ...(user?.role === 'admin' ? [
-      { to: '/users', label: 'User Management', icon: Shield },
-      { to: '/settings', label: 'Settings', icon: Settings },
-    ] : []),
+    ...adminLinks.filter((l) => can(l.permission)),
   ];
   return (
     <div className="flex flex-col h-full bg-white border-r border-gray-200">
@@ -33,7 +36,7 @@ export function Sidebar({ onClose }: { onClose?: () => void }) {
           {logo_url ? (
             <img src={logo_url} alt="Logo" className="h-8 w-8 object-contain rounded flex-shrink-0" />
           ) : null}
-          <h1 className="text-lg font-bold text-primary-700 truncate">{company_name || 'TextiLedger'}</h1>
+          <h1 className="text-lg font-bold text-primary-700 truncate">{company_name || 'Inventory Management'}</h1>
         </div>
         {onClose && (
           <button onClick={onClose} className="lg:hidden p-1 rounded hover:bg-gray-100">

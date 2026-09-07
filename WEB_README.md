@@ -1,4 +1,4 @@
-# Saree Inventory & Job Work Management System
+# Inventory Management
 
 A responsive web-based ERP application for managing saree inventory, purchases, goods receipts, and job work operations. Converted from a PySide6 desktop application to a modern web stack.
 

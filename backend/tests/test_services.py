@@ -14,6 +14,7 @@ from app.services.jobwork_service import JobWorkService
 from app.services.inventory_service import InventoryService
 from app.services.dashboard_service import DashboardService
 from app.services.auth_service import AuthService
+from app.services.rbac_service import seed_rbac
 
 # Use SQLite for tests
 TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
@@ -26,6 +27,7 @@ async def db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     async with TestSession() as session:
+        await seed_rbac(session)
         yield session
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
@@ -230,8 +232,10 @@ async def test_dashboard(db: AsyncSession):
 @pytest.mark.asyncio
 async def test_auth_register_and_login(db: AsyncSession):
     auth = AuthService(db)
-    user = await auth.register("testuser", "password123", "Test User")
+    user = await auth.register("testuser", "password123", "Test User", role="manager")
     assert user.username == "testuser"
+    assert user.role == "manager"
+    assert "reports" in user.permissions
 
     access, refresh, logged = await auth.login("testuser", "password123")
     assert access

@@ -32,7 +32,7 @@ export function MainLayout() {
           <button className="lg:hidden p-1.5 rounded-lg hover:bg-gray-100" onClick={() => setSidebarOpen(true)}>
             <Menu className="h-5 w-5" />
           </button>
-          <h2 className="text-sm font-semibold text-gray-600 hidden lg:block">TextiLedger — Inventory Management</h2>
+          <h2 className="text-sm font-semibold text-gray-600 hidden lg:block">Inventory Management</h2>
           <button onClick={logout} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-red-600 transition-colors">
             <LogOut className="h-4 w-4" /> <span className="hidden sm:inline">Logout</span>
           </button>

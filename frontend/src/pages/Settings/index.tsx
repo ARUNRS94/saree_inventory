@@ -3,45 +3,36 @@ import api from '@/services/api';
 import { useSettings } from '@/contexts/SettingsContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { PageHeader } from '@/components/PageHeader';
-import { Upload, Trash2, Building2 } from 'lucide-react';
+import { Trash2, Building2, Image as ImageIcon } from 'lucide-react';
 
 export default function SettingsPage() {
-  const { user } = useAuth();
+  const { can } = useAuth();
   const { logo_url, company_name, reload } = useSettings();
   const [name, setName] = useState(company_name);
-  const [uploading, setUploading] = useState(false);
+  const [logo, setLogo] = useState(logo_url);
+  const [savingLogo, setSavingLogo] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  if (user?.role !== 'admin') {
-    return <div className="text-center py-12 text-gray-500">Admin access required.</div>;
+  if (!can('settings')) {
+    return <div className="text-center py-12 text-gray-500">You do not have access to settings.</div>;
   }
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploading(true); setError(''); setSuccess('');
+  const saveLogo = async (value: string) => {
+    setSavingLogo(true); setError(''); setSuccess('');
     try {
-      const form = new FormData();
-      form.append('file', file);
-      await api.post('/settings/logo', form, { headers: { 'Content-Type': 'multipart/form-data' } });
-      setSuccess('Logo uploaded.');
-      reload();
-    } catch (err: unknown) {
-      setError((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Upload failed');
-    } finally { setUploading(false); e.target.value = ''; }
-  };
-
-  const removeLogo = async () => {
-    setError(''); setSuccess('');
-    try {
-      await api.delete('/settings/logo');
-      setSuccess('Logo removed.');
+      await api.put('/settings', { logo_url: value });
+      setSuccess(value ? 'Logo updated.' : 'Logo removed.');
       reload();
     } catch (err: unknown) {
       setError((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed');
-    }
+    } finally { setSavingLogo(false); }
+  };
+
+  const removeLogo = async () => {
+    setLogo('');
+    await saveLogo('');
   };
 
   const saveName = async () => {
@@ -64,8 +55,8 @@ export default function SettingsPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Logo */}
         <div className="card p-6">
-          <h3 className="text-sm font-semibold mb-4 flex items-center gap-2"><Upload className="h-4 w-4" /> Company Logo</h3>
-          <div className="flex items-center gap-6">
+          <h3 className="text-sm font-semibold mb-4 flex items-center gap-2"><ImageIcon className="h-4 w-4" /> Company Logo</h3>
+          <div className="flex items-start gap-6">
             <div className="w-24 h-24 rounded-xl border-2 border-dashed border-gray-300 flex items-center justify-center bg-gray-50 overflow-hidden flex-shrink-0">
               {logo_url ? (
                 <img src={logo_url} alt="Logo" className="w-full h-full object-contain" />
@@ -73,18 +64,20 @@ export default function SettingsPage() {
                 <Building2 className="h-10 w-10 text-gray-300" />
               )}
             </div>
-            <div className="space-y-2">
-              <label className="btn-primary text-sm cursor-pointer inline-flex items-center gap-1">
-                <Upload className="h-4 w-4" />
-                {uploading ? 'Uploading...' : 'Upload Logo'}
-                <input type="file" accept=".png,.jpg,.jpeg,.svg,.webp" onChange={handleUpload} className="hidden" disabled={uploading} />
-              </label>
-              {logo_url && (
-                <button className="btn-danger text-sm flex items-center gap-1" onClick={removeLogo}>
-                  <Trash2 className="h-4 w-4" /> Remove
+            <div className="flex-1 space-y-2">
+              <input className="input" value={logo} onChange={(e) => setLogo(e.target.value)}
+                placeholder="https://cdn.example.com/logo.png" />
+              <div className="flex gap-2">
+                <button className="btn-primary text-sm" onClick={() => saveLogo(logo)} disabled={savingLogo}>
+                  {savingLogo ? 'Saving...' : 'Save Logo'}
                 </button>
-              )}
-              <p className="text-xs text-gray-400">PNG, JPG, SVG or WebP. Max 2MB.</p>
+                {logo_url && (
+                  <button className="btn-danger text-sm flex items-center gap-1" onClick={removeLogo} disabled={savingLogo}>
+                    <Trash2 className="h-4 w-4" /> Remove
+                  </button>
+                )}
+              </div>
+              <p className="text-xs text-gray-400">Paste a public image URL. Container storage is ephemeral, so files are not hosted here.</p>
             </div>
           </div>
         </div>

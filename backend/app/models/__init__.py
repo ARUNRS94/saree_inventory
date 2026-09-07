@@ -1,4 +1,6 @@
+from app.models.role import Permission, Role, RolePermission
 from app.models.user import User
+from app.models.user_identity import UserIdentity
 from app.models.saree import Saree
 from app.models.supplier import Supplier
 from app.models.vendor import Vendor
@@ -10,7 +12,8 @@ from app.models.stock_ledger import StockLedger
 from app.models.company_settings import CompanySettings
 
 __all__ = [
-    "User", "Saree", "Supplier", "Vendor", "VendorProcessType",
+    "User", "UserIdentity", "Role", "Permission", "RolePermission",
+    "Saree", "Supplier", "Vendor", "VendorProcessType",
     "PurchaseOrder", "PurchaseOrderItem", "GRN", "GRNItem",
     "JobWorkIssue", "JobWorkIssueItem", "JobWorkReceipt", "JobWorkReceiptItem",
     "StockLedger", "CompanySettings",
