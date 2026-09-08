@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user, get_db
-from app.models.saree import Saree
+from app.models.item import Item
 from app.models.stock_ledger import StockLedger
 from app.schemas.inventory import CustomerIssueCreate, StockLedgerListResponse, StockLedgerResponse, StockSummaryResponse, StockValuationResponse
 from app.services.inventory_service import InventoryService
@@ -22,10 +22,10 @@ async def get_stock(db: AsyncSession = Depends(get_db), _user=Depends(get_curren
     return [StockSummaryResponse(**r) for r in rows]
 
 
-@router.get("/stock/{saree_id}")
-async def get_stock_qty(saree_id: int, db: AsyncSession = Depends(get_db), _user=Depends(get_current_user)):
-    qty = await InventoryService(db).current_stock(saree_id)
-    return {"saree_id": saree_id, "current_stock": qty}
+@router.get("/stock/{item_id}")
+async def get_stock_qty(item_id: int, db: AsyncSession = Depends(get_db), _user=Depends(get_current_user)):
+    qty = await InventoryService(db).current_stock(item_id)
+    return {"item_id": item_id, "current_stock": qty}
 
 
 @router.get("/valuation", response_model=list[StockValuationResponse])
@@ -51,17 +51,17 @@ async def get_ledger(
     if search:
         like = f"%{search}%"
         base_filter.append(
-            StockLedger.reference_no.ilike(like) | Saree.saree_code.ilike(like) | Saree.saree_name.ilike(like)
+            StockLedger.reference_no.ilike(like) | Item.item_code.ilike(like) | Item.item_name.ilike(like)
         )
 
-    count_stmt = select(func.count()).select_from(StockLedger).join(Saree, Saree.saree_id == StockLedger.saree_id)
+    count_stmt = select(func.count()).select_from(StockLedger).join(Item, Item.item_id == StockLedger.item_id)
     for f in base_filter:
         count_stmt = count_stmt.where(f)
     total = await db.scalar(count_stmt) or 0
 
     stmt = (
-        select(StockLedger, Saree.saree_code, Saree.saree_name)
-        .join(Saree, Saree.saree_id == StockLedger.saree_id)
+        select(StockLedger, Item.item_code, Item.item_name)
+        .join(Item, Item.item_id == StockLedger.item_id)
     )
     for f in base_filter:
         stmt = stmt.where(f)
@@ -72,7 +72,7 @@ async def get_ledger(
         items.append(StockLedgerResponse(
             ledger_id=entry.ledger_id, transaction_date=entry.transaction_date,
             transaction_type=entry.transaction_type, reference_no=entry.reference_no,
-            saree_id=entry.saree_id, saree_code=code, saree_name=name,
+            item_id=entry.item_id, item_code=code, item_name=name,
             qty_in=entry.qty_in, qty_out=entry.qty_out, rate=entry.rate, remarks=entry.remarks,
         ))
     return StockLedgerListResponse(items=items, total=total, page=page, page_size=page_size)
@@ -82,11 +82,11 @@ async def get_ledger(
 async def customer_issue(body: CustomerIssueCreate, db: AsyncSession = Depends(get_db), _user=Depends(get_current_user)):
     try:
         service = InventoryService(db)
-        await service.assert_available(body.saree_id, body.quantity)
+        await service.assert_available(body.item_id, body.quantity)
         reference = body.reference or f"CUST-{date.today():%Y%m%d}"
         await service.post_ledger(
             transaction_date=date.today(), transaction_type="CUSTOMER_ISSUE",
-            reference_no=reference, saree_id=body.saree_id,
+            reference_no=reference, item_id=body.item_id,
             qty_out=body.quantity, remarks=body.remarks,
         )
         return {"message": "Customer issue saved and FG stock reduced."}

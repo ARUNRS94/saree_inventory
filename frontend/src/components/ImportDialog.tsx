@@ -15,7 +15,7 @@ interface ImportResult {
 }
 
 interface Props {
-  entity: 'sarees' | 'suppliers' | 'vendors' | 'process-types';
+  entity: 'items' | 'contacts' | 'vendors' | 'process-types';
   title: string;
   columns: string[];
   onClose: () => void;

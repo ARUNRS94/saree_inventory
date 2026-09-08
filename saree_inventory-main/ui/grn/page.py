@@ -1,0 +1,98 @@
+"""Goods receipt note UI."""
+from __future__ import annotations
+
+from decimal import Decimal
+
+from PySide6.QtWidgets import QComboBox, QDoubleSpinBox, QFormLayout, QLabel, QMessageBox, QPushButton, QSpinBox
+from sqlalchemy import select
+
+from database.database import session_scope
+from database.models.entities import PurchaseOrder, PurchaseOrderItem, Saree
+from services.purchase_service import PurchaseService
+from ui.common import Page, populate_combo
+
+
+class GrnPage(Page):
+    def __init__(self) -> None:
+        super().__init__("Goods Receipt Against PO")
+        form = QFormLayout()
+        self.po = QComboBox()
+        self.saree = QComboBox()
+        self.pending = QLabel("Pending: 0")
+        self.received = QSpinBox(); self.received.setRange(0, 100000)
+        self.damaged = QSpinBox(); self.damaged.setRange(0, 100000)
+        self.rate = QDoubleSpinBox(); self.rate.setRange(0, 10000000); self.rate.setDecimals(2)
+        form.addRow("PO", self.po)
+        form.addRow("Stock In Item", self.saree)
+        form.addRow(self.pending)
+        form.addRow("Received Qty", self.received)
+        form.addRow("Damaged Qty", self.damaged)
+        form.addRow("Unit Rate", self.rate)
+        save = QPushButton("Save GRN")
+        save.clicked.connect(self.save)
+        form.addRow(save)
+        self.layout.addLayout(form)
+        self.po.currentIndexChanged.connect(self.update_stock_in_items)
+        self.saree.currentIndexChanged.connect(self.update_pending)
+        self.refresh()
+
+    def refresh(self) -> None:
+        with session_scope() as session:
+            populate_combo(self.po, [(p.po_id, f"{p.po_number} - {p.supplier.supplier_name} ({p.supplier.contact_type})") for p in session.scalars(select(PurchaseOrder).where(PurchaseOrder.status.not_in(["CLOSED", "CANCELLED"])).order_by(PurchaseOrder.po_id.desc()))])
+        self.update_stock_in_items()
+
+    def update_stock_in_items(self) -> None:
+        if self.po.currentData() is None:
+            populate_combo(self.saree, [])
+            self.update_pending()
+            return
+        with session_scope() as session:
+            po = session.get(PurchaseOrder, int(self.po.currentData()))
+            if po is None:
+                rows = []
+            elif po.supplier.contact_type == "Sub vendor":
+                target_ids = [item.target_fg_saree_id for item in po.items if item.target_fg_saree_id is not None]
+                rows = [(s.saree_id, f"{s.saree_code} - {s.saree_name} (FG)") for s in session.scalars(select(Saree).where(Saree.saree_id.in_(target_ids)).order_by(Saree.saree_code))] if target_ids else []
+            else:
+                rows = [(item.saree_id, f"{item.saree.saree_code} - {item.saree.saree_name} (RM)") for item in po.items]
+        populate_combo(self.saree, rows)
+        self.update_pending()
+
+    def update_pending(self) -> None:
+        if self.po.currentData() is None or self.saree.currentData() is None:
+            self.pending.setText("Pending: 0")
+            return
+        with session_scope() as session:
+            po_id = int(self.po.currentData())
+            po = session.get(PurchaseOrder, po_id)
+            saree_id = int(self.saree.currentData())
+            is_sub_vendor = po is not None and po.supplier.contact_type == "Sub vendor"
+            qty = PurchaseService(session).pending_po_qty(po_id, None if is_sub_vendor else saree_id)
+            po_rate = session.scalar(
+                select(PurchaseOrderItem.rate)
+                .where(PurchaseOrderItem.po_id == po_id)
+                .order_by(PurchaseOrderItem.po_item_id.desc())
+                .limit(1)
+            )
+            self.pending.setText(f"Pending: {qty}")
+            self.rate.setValue(float(po_rate or 0))
+
+    def save(self) -> None:
+        try:
+            if self.po.currentData() is None or self.saree.currentData() is None:
+                raise ValueError("Create an open PO and saree before saving a GRN.")
+            if not self.confirm("Save GRN", "Save this GRN and post stock movements?"):
+                return
+            with session_scope() as session:
+                grn = PurchaseService(session).receive_grn(
+                    int(self.po.currentData()),
+                    [(int(self.saree.currentData()), self.received.value(), self.damaged.value(), Decimal(str(self.rate.value())))],
+                )
+                grn_number = grn.grn_number
+            self.info(f"GRN {grn_number} saved and stock updated.")
+            self.refresh()
+        except Exception as exc:
+            self.error(str(exc))
+
+    def confirm(self, title: str, message: str) -> bool:
+        return QMessageBox.question(self, title, message, QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == QMessageBox.Yes

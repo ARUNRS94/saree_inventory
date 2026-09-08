@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 
 class JobWorkIssueLineCreate(BaseModel):
-    saree_id: int
+    item_id: int
     issued_qty: int = Field(gt=0)
 
 
@@ -20,9 +20,9 @@ class JobWorkIssueCreate(BaseModel):
 
 class JobWorkIssueItemResponse(BaseModel):
     issue_item_id: int
-    saree_id: int
-    saree_code: str | None = None
-    saree_name: str | None = None
+    item_id: int
+    item_code: str | None = None
+    item_name: str | None = None
     issued_qty: int
 
     model_config = {"from_attributes": True}
@@ -49,7 +49,7 @@ class JobWorkIssueListResponse(BaseModel):
 
 
 class JobWorkReceiptLineCreate(BaseModel):
-    saree_id: int
+    item_id: int
     received_qty: int = Field(ge=0)
     rejected_qty: int = Field(ge=0, default=0)
     process_cost: Decimal = Field(ge=0, default=0)
@@ -64,9 +64,9 @@ class JobWorkReceiptCreate(BaseModel):
 
 class JobWorkReceiptItemResponse(BaseModel):
     receipt_item_id: int
-    saree_id: int
-    saree_code: str | None = None
-    saree_name: str | None = None
+    item_id: int
+    item_code: str | None = None
+    item_name: str | None = None
     received_qty: int
     rejected_qty: int
     process_cost: Decimal

@@ -6,6 +6,7 @@ import { FilterBar } from '@/components/FilterBar';
 import { DataTable, Pagination } from '@/components/DataTable';
 import { LoadingState, EmptyState } from '@/components/LoadingState';
 import { formatDate } from '@/utils/format';
+import { ITEM_TYPE_OPTIONS, itemTypeLabel } from '@/utils/itemTypes';
 
 const TXN_TYPES = ['PURCHASE', 'SUB_VENDOR_ISSUE', 'WIP_STOCK_IN', 'SUB_VENDOR_GRN', 'WIP_STOCK_OUT', 'JOBWORK_ISSUE', 'JOBWORK_RECEIPT', 'CUSTOMER_ISSUE', 'STOCK_ADJUSTMENT'];
 
@@ -37,8 +38,8 @@ export default function InventoryPage() {
   useEffect(() => { load(); }, [load]);
 
   const filtered = tab === 'stock' ? stock.filter((s) => {
-    const matchText = !search || `${s.saree_code} ${s.saree_name}`.toLowerCase().includes(search.toLowerCase());
-    const matchType = !stockType || s.fabric === stockType;
+    const matchText = !search || `${s.item_code} ${s.item_name}`.toLowerCase().includes(search.toLowerCase());
+    const matchType = !stockType || s.item_type === stockType;
     return matchText && matchType;
   }) : [];
 
@@ -58,7 +59,7 @@ export default function InventoryPage() {
               search={{ value: search, onChange: setSearch, placeholder: 'Filter by code or name...' }}
               filters={[{
                 label: 'Type', value: stockType, onChange: setStockType,
-                options: [{ value: '', label: 'All Types' }, { value: 'RM', label: 'RM' }, { value: 'FG', label: 'FG' }, { value: 'Sub process', label: 'Sub process' }],
+                options: [{ value: '', label: 'All Types' }, ...ITEM_TYPE_OPTIONS],
               }]}
               onClear={() => { setSearch(''); setStockType(''); }}
             />
@@ -76,10 +77,10 @@ export default function InventoryPage() {
         </div>
         {loading ? <LoadingState /> : tab === 'stock' ? (
           filtered.length === 0 ? <EmptyState /> : (
-            <DataTable keyField="saree_id" data={filtered} columns={[
-              { header: 'Code', accessor: 'saree_code' },
-              { header: 'Name', accessor: 'saree_name' },
-              { header: 'Type', accessor: 'fabric' },
+            <DataTable keyField="item_id" data={filtered} columns={[
+              { header: 'Code', accessor: 'item_code' },
+              { header: 'Name', accessor: 'item_name' },
+              { header: 'Type', accessor: (s) => itemTypeLabel(s.item_type) },
               { header: 'Stock', accessor: 'current_stock', className: 'font-semibold' },
             ]} />
           )
@@ -90,7 +91,7 @@ export default function InventoryPage() {
                 { header: 'Date', accessor: (r) => formatDate(r.transaction_date) },
                 { header: 'Type', accessor: 'transaction_type' },
                 { header: 'Reference', accessor: 'reference_no', hideOnMobile: true },
-                { header: 'Item', accessor: (r) => `${r.saree_code} - ${r.saree_name}` },
+                { header: 'Item', accessor: (r) => `${r.item_code} - ${r.item_name}` },
                 { header: 'In', accessor: 'qty_in' },
                 { header: 'Out', accessor: 'qty_out' },
                 { header: 'Rate', accessor: 'rate', hideOnMobile: true },

@@ -9,15 +9,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.grn import GRN, GRNItem
 from app.models.job_work import JobWorkIssue, JobWorkIssueItem, JobWorkReceipt, JobWorkReceiptItem
 from app.models.purchase_order import PurchaseOrder, PurchaseOrderItem
-from app.models.saree import Saree
+from app.models.item import Item
 from app.models.stock_ledger import StockLedger
-from app.models.supplier import Supplier
+from app.models.contact import Contact
 from app.models.vendor import Vendor
 from app.schemas.dashboard import (
     CategoryStockItem, DashboardCardData, DashboardResponse,
     PurchaseTrendItem, StockMovementItem,
 )
 from app.services.inventory_service import InventoryService
+from app.services.master_service import item_type_label
 
 
 class DashboardService:
@@ -66,19 +67,19 @@ class DashboardService:
         vendor_wip = max(issued_qty - received_qty, 0)
 
         # Three master-data counts in a single round trip.
-        active_sarees, active_vendors, active_suppliers = (await self.session.execute(
+        active_items, active_vendors, active_contacts = (await self.session.execute(
             select(
-                select(func.count()).select_from(Saree).scalar_subquery(),
+                select(func.count()).select_from(Item).scalar_subquery(),
                 select(func.count()).select_from(Vendor).where(Vendor.is_active.is_(True)).scalar_subquery(),
-                select(func.count()).select_from(Supplier).where(Supplier.is_active.is_(True)).scalar_subquery(),
+                select(func.count()).select_from(Contact).where(Contact.is_active.is_(True)).scalar_subquery(),
             )
         )).one()
 
         return DashboardCardData(
             total_stock_qty=total_stock, stock_value=stock_value,
             open_po_value=Decimal(open_po_value or 0), pending_po_qty=int(pending_po_qty or 0),
-            vendor_wip_qty=vendor_wip, active_sarees=int(active_sarees or 0),
-            active_vendors=int(active_vendors or 0), active_suppliers=int(active_suppliers or 0),
+            vendor_wip_qty=vendor_wip, active_items=int(active_items or 0),
+            active_vendors=int(active_vendors or 0), active_contacts=int(active_contacts or 0),
         )
 
     async def _purchase_trend(self) -> list[PurchaseTrendItem]:
@@ -115,10 +116,10 @@ class DashboardService:
     async def _top_categories(self) -> list[CategoryStockItem]:
         balance = func.coalesce(func.sum(StockLedger.qty_in - StockLedger.qty_out), 0)
         stmt = (
-            select(func.coalesce(Saree.fabric, "FG"), balance)
+            select(func.coalesce(Item.item_type, "FG"), balance)
             .outerjoin(StockLedger)
-            .group_by(Saree.fabric)
+            .group_by(Item.item_type)
             .order_by(balance.desc())
         )
         result = await self.session.execute(stmt)
-        return [CategoryStockItem(category=cat or "FG", qty=int(qty)) for cat, qty in result]
+        return [CategoryStockItem(category=item_type_label(cat) or "Finished Goods", qty=int(qty)) for cat, qty in result]

@@ -62,10 +62,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from app.api.routes import access, auth, dashboard, sarees, suppliers, vendors, purchase_orders, grns, job_work, inventory, reports, imports
+from app.api.routes import access, auth, dashboard, items, contacts, vendors, purchase_orders, grns, job_work, inventory, reports, imports
 from app.api.routes import settings as settings_routes
 
-for router in [auth.router, access.router, dashboard.router, sarees.router, suppliers.router,
+for router in [auth.router, access.router, dashboard.router, items.router, contacts.router,
                vendors.router, purchase_orders.router, grns.router,
                job_work.router, inventory.router, reports.router,
                imports.router, imports.export_router, settings_routes.router]:

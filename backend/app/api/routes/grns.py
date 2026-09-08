@@ -14,9 +14,9 @@ router = APIRouter(prefix="/grns", tags=["GRN"])
 
 def _grn_to_response(grn) -> GRNResponse:
     items = [GRNItemResponse(
-        grn_item_id=item.grn_item_id, saree_id=item.saree_id,
-        saree_code=item.saree.saree_code if item.saree else None,
-        saree_name=item.saree.saree_name if item.saree else None,
+        grn_item_id=item.grn_item_id, item_id=item.item_id,
+        item_code=item.item.item_code if item.item else None,
+        item_name=item.item.item_name if item.item else None,
         received_qty=item.received_qty, damaged_qty=item.damaged_qty, rate=item.rate,
     ) for item in grn.items]
     return GRNResponse(
@@ -43,13 +43,13 @@ async def list_grns(
 @router.post("", response_model=GRNResponse, status_code=201)
 async def create_grn(body: GRNCreate, db: AsyncSession = Depends(get_db), _user=Depends(get_current_user)):
     try:
-        lines = [(item.saree_id, item.received_qty, item.damaged_qty, item.rate) for item in body.items]
+        lines = [(item.item_id, item.received_qty, item.damaged_qty, item.rate) for item in body.items]
         grn = await PurchaseService(db).receive_grn(body.po_id, lines, body.grn_date, body.remarks)
         from sqlalchemy.orm import selectinload
         from app.models.grn import GRN, GRNItem
         grn = await db.get(GRN, grn.grn_id, options=[
             selectinload(GRN.purchase_order),
-            selectinload(GRN.items).selectinload(GRNItem.saree),
+            selectinload(GRN.items).selectinload(GRNItem.item),
         ])
         return _grn_to_response(grn)
     except ValueError as e:

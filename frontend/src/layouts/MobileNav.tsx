@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Package, ShoppingCart, Wrench, MoreHorizontal } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, Truck, MoreHorizontal } from 'lucide-react';
 import clsx from 'clsx';
 import { useState } from 'react';
 
@@ -7,14 +7,13 @@ const mainLinks = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/inventory', label: 'Inventory', icon: Package },
   { to: '/purchase-orders', label: 'Purchase', icon: ShoppingCart },
-  { to: '/job-work', label: 'Job Work', icon: Wrench },
+  { to: '/customer-issue', label: 'Cust. Issue', icon: Truck },
 ];
 
 const moreLinks = [
   { to: '/grn', label: 'GRN' },
-  { to: '/sarees', label: 'Sarees' },
-  { to: '/suppliers', label: 'Suppliers' },
-  { to: '/vendors', label: 'Vendors' },
+  { to: '/items', label: 'Items' },
+  { to: '/contacts', label: 'Contacts' },
   { to: '/reports', label: 'Reports' },
 ];
 

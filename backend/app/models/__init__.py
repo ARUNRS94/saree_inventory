@@ -1,8 +1,8 @@
 from app.models.role import Permission, Role, RolePermission
 from app.models.user import User
 from app.models.user_identity import UserIdentity
-from app.models.saree import Saree
-from app.models.supplier import Supplier
+from app.models.item import Item
+from app.models.contact import Contact
 from app.models.vendor import Vendor
 from app.models.vendor_process_type import VendorProcessType
 from app.models.purchase_order import PurchaseOrder, PurchaseOrderItem
@@ -13,7 +13,7 @@ from app.models.company_settings import CompanySettings
 
 __all__ = [
     "User", "UserIdentity", "Role", "Permission", "RolePermission",
-    "Saree", "Supplier", "Vendor", "VendorProcessType",
+    "Item", "Contact", "Vendor", "VendorProcessType",
     "PurchaseOrder", "PurchaseOrderItem", "GRN", "GRNItem",
     "JobWorkIssue", "JobWorkIssueItem", "JobWorkReceipt", "JobWorkReceiptItem",
     "StockLedger", "CompanySettings",

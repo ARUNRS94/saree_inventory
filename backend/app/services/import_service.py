@@ -7,11 +7,14 @@ from dataclasses import dataclass, field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.saree import Saree
-from app.models.supplier import Supplier
+from app.models.item import Item
+from app.models.contact import Contact
 from app.models.vendor import Vendor
 from app.models.vendor_process_type import VendorProcessType
-from app.services.master_service import CONTACT_TYPES, ITEM_TYPES, MasterService
+from app.services.master_service import (
+    CONTACT_TYPES, ITEM_TYPE_LABELS, MasterService, item_type_label,
+    normalise_contact_type, normalise_item_type,
+)
 
 MAX_ROWS = 5000
 EXPORT_LIMIT = 100_000
@@ -19,33 +22,61 @@ EXPORT_LIMIT = 100_000
 
 @dataclass
 class EntitySpec:
+    """CSV shape for one master. Column names follow the original desktop app."""
+
     columns: list[str]
+    field_map: dict[str, str]
     required: list[str]
     key: str
     sample: list[str]
+    # Older/alternate headers accepted on import, mapped onto the canonical ones.
+    aliases: dict[str, str] = field(default_factory=dict)
+
+    def canonical(self, header: str) -> str:
+        header = header.strip().lower()
+        return self.aliases.get(header, header)
 
 
 ENTITY_SPECS: dict[str, EntitySpec] = {
-    "sarees": EntitySpec(
-        columns=["saree_code", "saree_name", "fabric", "category", "design_name", "color", "unit"],
-        required=["saree_code", "saree_name"],
-        key="saree_code",
-        sample=["RM001", "Cotton Grey Fabric", "RM", "Cotton", "Plain", "White", "PCS"],
+    "items": EntitySpec(
+        columns=["code", "name", "type", "remarks", "color"],
+        field_map={
+            "code": "item_code", "name": "item_name", "type": "item_type",
+            "remarks": "remarks", "color": "color",
+        },
+        required=["code", "name"],
+        key="code",
+        sample=["RM001", "Cotton Grey Fabric", "Raw Material", "Plain weave", "White"],
+        aliases={
+            "item_code": "code", "item_name": "name", "item_type": "type",
+            "saree_code": "code", "saree_name": "name", "fabric": "type", "design_name": "remarks",
+        },
     ),
-    "suppliers": EntitySpec(
-        columns=["supplier_name", "contact_type", "contact_person", "phone", "gst_no", "address"],
-        required=["supplier_name", "contact_type"],
-        key="supplier_name",
-        sample=["Acme Textiles", "RM vendor", "Ravi", "9876543210", "29ABCDE1234F1Z5", "Surat"],
+    "contacts": EntitySpec(
+        columns=["name", "type", "contact_person", "phone", "gst_no", "address"],
+        field_map={
+            "name": "contact_name", "type": "contact_type", "contact_person": "contact_person",
+            "phone": "phone", "gst_no": "gst_no", "address": "address",
+        },
+        required=["name", "type"],
+        key="name",
+        sample=["Acme Textiles", "Raw Material Vendor", "Ravi", "9876543210", "29ABCDE1234F1Z5", "Surat"],
+        aliases={"contact_name": "name", "contact_type": "type", "supplier_name": "name"},
     ),
     "vendors": EntitySpec(
-        columns=["vendor_name", "process_type", "contact_person", "phone", "gst_no", "address"],
-        required=["vendor_name", "process_type"],
-        key="vendor_name",
+        columns=["name", "process_type", "contact_person", "phone", "gst_no", "address"],
+        field_map={
+            "name": "vendor_name", "process_type": "process_type", "contact_person": "contact_person",
+            "phone": "phone", "gst_no": "gst_no", "address": "address",
+        },
+        required=["name", "process_type"],
+        key="name",
         sample=["Sri Dyeing Works", "Dyeing", "Kumar", "9876543210", "29ABCDE1234F1Z5", "Erode"],
+        aliases={"vendor_name": "name"},
     ),
     "process-types": EntitySpec(
         columns=["process_type"],
+        field_map={"process_type": "process_type"},
         required=["process_type"],
         key="process_type",
         sample=["Dyeing"],
@@ -84,9 +115,9 @@ async def export_csv(
     spec = ENTITY_SPECS[entity]
     master = MasterService(session)
 
-    if entity == "sarees":
-        rows, _ = await master.search_sarees(search, filter_value, 1, EXPORT_LIMIT, sort_by, sort_dir)
-    elif entity == "suppliers":
+    if entity == "items":
+        rows, _ = await master.search_items(search, filter_value, 1, EXPORT_LIMIT, sort_by, sort_dir)
+    elif entity == "contacts":
         rows, _ = await master.search_contacts(search, filter_value, 1, EXPORT_LIMIT, sort_by, sort_dir)
     elif entity == "vendors":
         rows, _ = await master.search_vendors(search, filter_value, 1, EXPORT_LIMIT, sort_by, sort_dir)
@@ -97,7 +128,13 @@ async def export_csv(
     writer = csv.writer(buffer)
     writer.writerow(spec.columns)
     for row in rows:
-        writer.writerow([getattr(row, column, "") if getattr(row, column, None) is not None else "" for column in spec.columns])
+        values = []
+        for column in spec.columns:
+            value = getattr(row, spec.field_map[column], None)
+            if column == "type" and entity == "items":
+                value = item_type_label(value)
+            values.append("" if value is None else value)
+        writer.writerow(values)
     return buffer.getvalue()
 
 
@@ -108,8 +145,8 @@ class ImportService:
 
     async def _existing_keys(self, entity: str) -> set[str]:
         column = {
-            "sarees": Saree.saree_code,
-            "suppliers": Supplier.supplier_name,
+            "items": Item.item_code,
+            "contacts": Contact.contact_name,
             "vendors": Vendor.vendor_name,
             "process-types": VendorProcessType.process_type,
         }[entity]
@@ -117,24 +154,24 @@ class ImportService:
         return {value for value in result.scalars().all() if value}
 
     async def _create(self, entity: str, row: dict[str, str]) -> None:
-        if entity == "sarees":
-            item_type = row.get("fabric") or "FG"
-            if item_type not in ITEM_TYPES:
-                raise ValueError(f"fabric must be one of: {', '.join(ITEM_TYPES)}")
-            await self.master.create_saree(
-                row["saree_code"], row["saree_name"], fabric=item_type,
-                category=row.get("category") or None, design_name=row.get("design_name") or None,
-                color=row.get("color") or None, unit=row.get("unit") or "PCS",
+        if entity == "items":
+            raw_type = row.get("type")
+            item_type = normalise_item_type(raw_type) if raw_type else "FG"
+            if item_type is None:
+                raise ValueError(f"type must be one of: {', '.join(ITEM_TYPE_LABELS.values())}")
+            await self.master.create_item(
+                row["code"], row["name"], item_type=item_type,
+                remarks=row.get("remarks") or None, color=row.get("color") or None,
             )
-        elif entity == "suppliers":
+        elif entity == "contacts":
             await self.master.create_contact(
-                row["supplier_name"], row["contact_type"],
+                row["name"], row["type"],
                 contact_person=row.get("contact_person") or None, phone=row.get("phone") or None,
                 gst_no=row.get("gst_no") or None, address=row.get("address") or None,
             )
         elif entity == "vendors":
             await self.master.create_vendor(
-                row["vendor_name"], row["process_type"],
+                row["name"], row["process_type"],
                 contact_person=row.get("contact_person") or None, phone=row.get("phone") or None,
                 gst_no=row.get("gst_no") or None, address=row.get("address") or None,
             )
@@ -152,7 +189,7 @@ class ImportService:
             raise ValueError("File must be UTF-8 encoded CSV.")
 
         reader = csv.DictReader(io.StringIO(text))
-        headers = {(h or "").strip().lower() for h in (reader.fieldnames or [])}
+        headers = {spec.canonical(h) for h in (reader.fieldnames or []) if h}
         missing = [c for c in spec.required if c not in headers]
         if missing:
             raise ValueError(f"Missing required column(s): {', '.join(missing)}")
@@ -166,7 +203,7 @@ class ImportService:
                 result.errors.append({"row": line_no, "value": "", "reason": f"Stopped at {MAX_ROWS} row limit."})
                 break
 
-            row = {(k or "").strip().lower(): (v or "").strip() for k, v in raw.items() if k}
+            row = {spec.canonical(k): (v or "").strip() for k, v in raw.items() if k}
             if not any(row.values()):
                 continue
 
@@ -183,10 +220,10 @@ class ImportService:
                 })
                 continue
 
-            if entity == "suppliers" and row.get("contact_type") not in CONTACT_TYPES:
+            if entity == "contacts" and normalise_contact_type(row.get("type")) is None:
                 result.errors.append({
                     "row": line_no, "value": key_value,
-                    "reason": f"contact_type must be one of: {', '.join(CONTACT_TYPES)}",
+                    "reason": f"type must be one of: {', '.join(CONTACT_TYPES)}",
                 })
                 continue
 

@@ -20,7 +20,7 @@ class JobWorkService:
     async def issue(self, vendor_id: int, lines: list[tuple[int, int]],
                     issue_date: date | None = None, remarks: str | None = None) -> JobWorkIssue:
         if not lines:
-            raise ValueError("Job work issue requires at least one saree line.")
+            raise ValueError("Job work issue requires at least one item line.")
         document_date = issue_date or date.today()
         jw_issue = JobWorkIssue(
             issue_no=await next_number(self.session, JobWorkIssue, "issue_no", "JWISS", document_date),
@@ -29,12 +29,12 @@ class JobWorkService:
             remarks=remarks,
             status="OPEN",
         )
-        for saree_id, quantity in lines:
-            await self.inventory.assert_available(saree_id, quantity)
-            jw_issue.items.append(JobWorkIssueItem(saree_id=saree_id, issued_qty=quantity))
+        for item_id, quantity in lines:
+            await self.inventory.assert_available(item_id, quantity)
+            jw_issue.items.append(JobWorkIssueItem(item_id=item_id, issued_qty=quantity))
             await self.inventory.post_ledger(
                 transaction_date=document_date, transaction_type="JOBWORK_ISSUE",
-                reference_no=jw_issue.issue_no, saree_id=saree_id, qty_out=quantity, remarks=remarks,
+                reference_no=jw_issue.issue_no, item_id=item_id, qty_out=quantity, remarks=remarks,
             )
         self.session.add(jw_issue)
         await self.session.flush()
@@ -47,7 +47,7 @@ class JobWorkService:
         if issue is None:
             raise ValueError("Job work issue not found.")
         if not lines:
-            raise ValueError("Job work receipt requires at least one saree line.")
+            raise ValueError("Job work receipt requires at least one item line.")
 
         document_date = receipt_date or date.today()
         receipt = JobWorkReceipt(
@@ -56,21 +56,21 @@ class JobWorkService:
             vendor_id=vendor_id,
             receipt_date=document_date,
         )
-        for saree_id, received_qty, rejected_qty, process_cost in lines:
+        for item_id, received_qty, rejected_qty, process_cost in lines:
             total_receipt_qty = received_qty + rejected_qty
             if received_qty < 0 or rejected_qty < 0 or total_receipt_qty <= 0:
                 raise ValueError("Received or rejected quantity is required.")
-            pending = await self.pending_issue_qty(issue_id, saree_id)
+            pending = await self.pending_issue_qty(issue_id, item_id)
             if total_receipt_qty > pending:
                 raise ValueError(f"Receipt quantity exceeds pending job work quantity. Pending: {pending}.")
             receipt.items.append(JobWorkReceiptItem(
-                saree_id=saree_id, received_qty=received_qty,
+                item_id=item_id, received_qty=received_qty,
                 rejected_qty=rejected_qty, process_cost=process_cost,
             ))
             if received_qty:
                 await self.inventory.post_ledger(
                     transaction_date=document_date, transaction_type="JOBWORK_RECEIPT",
-                    reference_no=receipt.receipt_no, saree_id=saree_id,
+                    reference_no=receipt.receipt_no, item_id=item_id,
                     qty_in=received_qty, rate=process_cost,
                 )
         self.session.add(receipt)
@@ -78,15 +78,15 @@ class JobWorkService:
         await self._update_issue_status(issue)
         return receipt
 
-    async def pending_issue_qty(self, issue_id: int, saree_id: int) -> int:
+    async def pending_issue_qty(self, issue_id: int, item_id: int) -> int:
         issued = int(await self.session.scalar(
             select(func.coalesce(func.sum(JobWorkIssueItem.issued_qty), 0))
-            .where(JobWorkIssueItem.issue_id == issue_id, JobWorkIssueItem.saree_id == saree_id)
+            .where(JobWorkIssueItem.issue_id == issue_id, JobWorkIssueItem.item_id == item_id)
         ) or 0)
         received = int(await self.session.scalar(
             select(func.coalesce(func.sum(JobWorkReceiptItem.received_qty + JobWorkReceiptItem.rejected_qty), 0))
             .join(JobWorkReceipt)
-            .where(JobWorkReceipt.issue_id == issue_id, JobWorkReceiptItem.saree_id == saree_id)
+            .where(JobWorkReceipt.issue_id == issue_id, JobWorkReceiptItem.item_id == item_id)
         ) or 0)
         return max(issued - received, 0)
 
@@ -104,7 +104,7 @@ class JobWorkService:
                           page: int = 1, page_size: int = 50) -> tuple[list[JobWorkIssue], int]:
         stmt = select(JobWorkIssue).options(
             selectinload(JobWorkIssue.vendor),
-            selectinload(JobWorkIssue.items).selectinload(JobWorkIssueItem.saree),
+            selectinload(JobWorkIssue.items).selectinload(JobWorkIssueItem.item),
         )
         count_stmt = select(func.count()).select_from(JobWorkIssue)
         if status:
@@ -133,7 +133,7 @@ class JobWorkService:
         stmt = select(JobWorkReceipt).options(
             selectinload(JobWorkReceipt.vendor),
             selectinload(JobWorkReceipt.issue),
-            selectinload(JobWorkReceipt.items).selectinload(JobWorkReceiptItem.saree),
+            selectinload(JobWorkReceipt.items).selectinload(JobWorkReceiptItem.item),
         )
         count_stmt = select(func.count()).select_from(JobWorkReceipt)
         if issue_id:

@@ -1,6 +1,6 @@
 # Inventory Management
 
-Web-based ERP for saree/textile inventory: item and contact masters, purchase orders, goods receipt
+Web-based ERP for item/textile inventory: item and contact masters, purchase orders, goods receipt
 notes, job work (vendor WIP), stock ledger, valuation and reports — with role-based access control.
 
 ```
@@ -150,7 +150,7 @@ changed at runtime from **Access Management** without a redeploy.
 |---|---|
 | `users` | Create, edit and deactivate users |
 | `roles` | Create roles, assign permissions |
-| `masters` | Sarees, suppliers, vendors |
+| `masters` | Items, contacts, vendors |
 | `imports` | Bulk CSV import (admin only by default) |
 | `purchase` / `grn` / `jobwork` | Transaction entry |
 | `inventory` | View and adjust stock |
@@ -168,7 +168,7 @@ Google account is linked to an existing user by email, or provisioned with `GOOG
 
 ## Bulk import and export
 
-Master tables (Sarees, Suppliers, Vendors, Process Types) support CSV import and export.
+Master tables (Items, Contacts, Vendors, Process Types) support CSV import and export.
 
 - **Import** requires the `imports` permission. Download the template from the dialog. Rows whose
   key already exists are **skipped, not overwritten**. Duplicates are detected both against the

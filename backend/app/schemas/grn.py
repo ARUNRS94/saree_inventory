@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 
 class GRNLineCreate(BaseModel):
-    saree_id: int
+    item_id: int
     received_qty: int = Field(ge=0)
     damaged_qty: int = Field(ge=0, default=0)
     rate: Decimal = Field(ge=0)
@@ -22,9 +22,9 @@ class GRNCreate(BaseModel):
 
 class GRNItemResponse(BaseModel):
     grn_item_id: int
-    saree_id: int
-    saree_code: str | None = None
-    saree_name: str | None = None
+    item_id: int
+    item_code: str | None = None
+    item_name: str | None = None
     received_qty: int
     damaged_qty: int
     rate: Decimal

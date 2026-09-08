@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import api from '@/services/api';
-import type { PurchaseOrder, Supplier, Saree, PaginatedResponse } from '@/types';
+import type { PurchaseOrder, Contact, Item, PaginatedResponse } from '@/types';
 import { PageHeader } from '@/components/PageHeader';
 import { FilterBar } from '@/components/FilterBar';
 import { DataTable, Pagination } from '@/components/DataTable';
@@ -8,21 +8,23 @@ import { StatusBadge } from '@/components/StatusBadge';
 import { LoadingState, EmptyState } from '@/components/LoadingState';
 import { useConfirmDialog } from '@/components/ConfirmDialog';
 import { formatDate, formatCurrency } from '@/utils/format';
+import { itemTypeLabel } from '@/utils/itemTypes';
+import { CUSTOMER, SUB_VENDOR } from '@/utils/contactTypes';
 
 export default function PurchaseOrdersPage() {
   const [data, setData] = useState<PaginatedResponse<PurchaseOrder>>({ items: [], total: 0, page: 1, page_size: 50 });
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
-  const [filterSupplier, setFilterSupplier] = useState('');
+  const [filterContact, setfilterContact] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [sarees, setSarees] = useState<Saree[]>([]);
-  const [allSarees, setAllSarees] = useState<Saree[]>([]);
-  const [form, setForm] = useState({ supplier_id: '', saree_id: '', stock_out_saree_id: '', target_fg_saree_id: '', quantity: 1, rate: 0, remarks: '' });
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [items, setItems] = useState<Item[]>([]);
+  const [allItems, setAllItems] = useState<Item[]>([]);
+  const [form, setForm] = useState({ contact_id: '', item_id: '', stock_out_item_id: '', target_fg_item_id: '', quantity: 1, rate: 0, remarks: '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -32,26 +34,26 @@ export default function PurchaseOrdersPage() {
     setLoading(true);
     api.get('/purchase-orders', { params: {
       page, page_size: 50, search: search || undefined,
-      status: filterStatus || undefined, supplier_id: filterSupplier || undefined,
+      status: filterStatus || undefined, contact_id: filterContact || undefined,
       date_from: dateFrom || undefined, date_to: dateTo || undefined,
     } }).then((r) => setData(r.data)).finally(() => setLoading(false));
-  }, [page, search, filterStatus, filterSupplier, dateFrom, dateTo]);
+  }, [page, search, filterStatus, filterContact, dateFrom, dateTo]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
-    api.get('/suppliers', { params: { page_size: 200 } }).then((r) => setSuppliers(r.data.items.filter((s: Supplier) => s.contact_type !== 'Customer')));
-    api.get('/sarees', { params: { page_size: 500 } }).then((r) => setAllSarees(r.data.items));
+    api.get('/contacts', { params: { page_size: 200 } }).then((r) => setContacts(r.data.items.filter((s: Contact) => s.contact_type !== CUSTOMER)));
+    api.get('/items', { params: { page_size: 500 } }).then((r) => setAllItems(r.data.items));
   }, []);
 
-  const selectedSupplier = suppliers.find((s) => s.supplier_id === Number(form.supplier_id));
-  const isSubVendor = selectedSupplier?.contact_type === 'Sub vendor';
+  const selectedContact = contacts.find((s) => s.contact_id === Number(form.contact_id));
+  const isSubVendor = selectedContact?.contact_type === SUB_VENDOR;
 
   useEffect(() => {
     const itemType = isSubVendor ? 'Sub process' : 'RM';
-    setSarees(allSarees.filter((s) => s.fabric === itemType));
-  }, [form.supplier_id, allSarees, isSubVendor]);
+    setItems(allItems.filter((s) => s.item_type === itemType));
+  }, [form.contact_id, allItems, isSubVendor]);
 
-  const openNew = () => { setForm({ supplier_id: '', saree_id: '', stock_out_saree_id: '', target_fg_saree_id: '', quantity: 1, rate: 0, remarks: '' }); setShowForm(true); setError(''); };
+  const openNew = () => { setForm({ contact_id: '', item_id: '', stock_out_item_id: '', target_fg_item_id: '', quantity: 1, rate: 0, remarks: '' }); setShowForm(true); setError(''); };
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -59,14 +61,14 @@ export default function PurchaseOrdersPage() {
     setSaving(true); setError(''); setSuccess('');
     try {
       const body = {
-        supplier_id: Number(form.supplier_id),
+        contact_id: Number(form.contact_id),
         remarks: form.remarks || null,
         items: [{
-          saree_id: Number(form.saree_id),
+          item_id: Number(form.item_id),
           quantity: form.quantity,
           rate: form.rate,
-          stock_out_saree_id: isSubVendor && form.stock_out_saree_id ? Number(form.stock_out_saree_id) : null,
-          target_fg_saree_id: isSubVendor && form.target_fg_saree_id ? Number(form.target_fg_saree_id) : null,
+          stock_out_item_id: isSubVendor && form.stock_out_item_id ? Number(form.stock_out_item_id) : null,
+          target_fg_item_id: isSubVendor && form.target_fg_item_id ? Number(form.target_fg_item_id) : null,
         }],
       };
       const res = await api.post('/purchase-orders', body);
@@ -84,8 +86,8 @@ export default function PurchaseOrdersPage() {
     } catch (err: unknown) { setError((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed'); }
   };
 
-  const fgSarees = allSarees.filter((s) => s.fabric === 'FG');
-  const rmFgSarees = allSarees.filter((s) => s.fabric === 'RM' || s.fabric === 'FG');
+  const fgItems = allItems.filter((s) => s.item_type === 'FG');
+  const rmfgItems = allItems.filter((s) => s.item_type === 'RM' || s.item_type === 'FG');
 
   return (
     <div>
@@ -98,30 +100,30 @@ export default function PurchaseOrdersPage() {
         <div className="card p-4 sm:p-6 mb-6">
           <h3 className="font-semibold mb-4">New Purchase Order</h3>
           <form onSubmit={save} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            <div><label className="label">RM/Sub Vendor *</label>
-              <select className="input" value={form.supplier_id} onChange={(e) => setForm({ ...form, supplier_id: e.target.value })} required>
+            <div><label className="label">Raw Material / Sub Vendor *</label>
+              <select className="input" value={form.contact_id} onChange={(e) => setForm({ ...form, contact_id: e.target.value })} required>
                 <option value="">Select</option>
-                {suppliers.map((s) => <option key={s.supplier_id} value={s.supplier_id}>{s.supplier_name} ({s.contact_type})</option>)}
+                {contacts.map((s) => <option key={s.contact_id} value={s.contact_id}>{s.contact_name} ({s.contact_type})</option>)}
               </select>
             </div>
             <div><label className="label">Stock In Item *</label>
-              <select className="input" value={form.saree_id} onChange={(e) => setForm({ ...form, saree_id: e.target.value })} required>
+              <select className="input" value={form.item_id} onChange={(e) => setForm({ ...form, item_id: e.target.value })} required>
                 <option value="">Select</option>
-                {sarees.map((s) => <option key={s.saree_id} value={s.saree_id}>{s.saree_code} - {s.saree_name}</option>)}
+                {items.map((s) => <option key={s.item_id} value={s.item_id}>{s.item_code} - {s.item_name}</option>)}
               </select>
             </div>
             {isSubVendor && (
               <>
                 <div><label className="label">Stock Out Item (RM/FG) *</label>
-                  <select className="input" value={form.stock_out_saree_id} onChange={(e) => setForm({ ...form, stock_out_saree_id: e.target.value })} required>
+                  <select className="input" value={form.stock_out_item_id} onChange={(e) => setForm({ ...form, stock_out_item_id: e.target.value })} required>
                     <option value="">Select</option>
-                    {rmFgSarees.map((s) => <option key={s.saree_id} value={s.saree_id}>{s.saree_code} - {s.saree_name} ({s.fabric})</option>)}
+                    {rmfgItems.map((s) => <option key={s.item_id} value={s.item_id}>{s.item_code} - {s.item_name} ({itemTypeLabel(s.item_type)})</option>)}
                   </select>
                 </div>
                 <div><label className="label">Target FG Item *</label>
-                  <select className="input" value={form.target_fg_saree_id} onChange={(e) => setForm({ ...form, target_fg_saree_id: e.target.value })} required>
+                  <select className="input" value={form.target_fg_item_id} onChange={(e) => setForm({ ...form, target_fg_item_id: e.target.value })} required>
                     <option value="">Select</option>
-                    {fgSarees.map((s) => <option key={s.saree_id} value={s.saree_id}>{s.saree_code} - {s.saree_name}</option>)}
+                    {fgItems.map((s) => <option key={s.item_id} value={s.item_id}>{s.item_code} - {s.item_name}</option>)}
                   </select>
                 </div>
               </>
@@ -141,25 +143,25 @@ export default function PurchaseOrdersPage() {
       <div className="card">
         <div className="p-4 border-b border-gray-100">
           <FilterBar
-            search={{ value: search, onChange: (v) => { setSearch(v); setPage(1); }, placeholder: 'Search PO number, supplier...' }}
+            search={{ value: search, onChange: (v) => { setSearch(v); setPage(1); }, placeholder: 'Search PO number, contact...' }}
             filters={[
               { label: 'Status', value: filterStatus, onChange: (v) => { setFilterStatus(v); setPage(1); },
                 options: [{ value: '', label: 'All' }, { value: 'OPEN', label: 'Open' }, { value: 'PARTIAL', label: 'Partial' }, { value: 'CLOSED', label: 'Closed' }, { value: 'CANCELLED', label: 'Cancelled' }] },
-              { label: 'Supplier', value: filterSupplier, onChange: (v) => { setFilterSupplier(v); setPage(1); },
-                options: [{ value: '', label: 'All Suppliers' }, ...suppliers.map((s) => ({ value: String(s.supplier_id), label: s.supplier_name }))] },
+              { label: 'Contact', value: filterContact, onChange: (v) => { setfilterContact(v); setPage(1); },
+                options: [{ value: '', label: 'All Contacts' }, ...contacts.map((s) => ({ value: String(s.contact_id), label: s.contact_name }))] },
             ]}
             dateRange={{ from: dateFrom, to: dateTo, onFromChange: (v) => { setDateFrom(v); setPage(1); }, onToChange: (v) => { setDateTo(v); setPage(1); } }}
-            onClear={() => { setSearch(''); setFilterStatus(''); setFilterSupplier(''); setDateFrom(''); setDateTo(''); setPage(1); }}
+            onClear={() => { setSearch(''); setFilterStatus(''); setfilterContact(''); setDateFrom(''); setDateTo(''); setPage(1); }}
           />
         </div>
         {loading ? <LoadingState /> : data.items.length === 0 ? <EmptyState /> : (
           <>
             <DataTable keyField="po_id" data={data.items} columns={[
               { header: 'PO No', accessor: 'po_number' },
-              { header: 'Supplier', accessor: 'supplier_name' },
+              { header: 'Contact', accessor: 'contact_name' },
               { header: 'Type', accessor: 'contact_type', hideOnMobile: true },
               { header: 'Date', accessor: (r) => formatDate(r.po_date) },
-              { header: 'Items', accessor: (r) => r.items.map((i) => i.saree_code).join(', '), hideOnMobile: true },
+              { header: 'Items', accessor: (r) => r.items.map((i) => i.item_code).join(', '), hideOnMobile: true },
               { header: 'Qty', accessor: (r) => r.items.reduce((s, i) => s + i.ordered_qty, 0) },
               { header: 'Amount', accessor: (r) => formatCurrency(r.items.reduce((s, i) => s + i.amount, 0)), hideOnMobile: true },
               { header: 'Status', accessor: (r) => <StatusBadge status={r.status} /> },

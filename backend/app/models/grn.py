@@ -27,9 +27,9 @@ class GRNItem(Base):
 
     grn_item_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     grn_id: Mapped[int] = mapped_column(ForeignKey("grns.grn_id"), nullable=False)
-    saree_id: Mapped[int] = mapped_column(ForeignKey("sarees.saree_id"), nullable=False)
+    item_id: Mapped[int] = mapped_column(ForeignKey("items.item_id"), nullable=False)
     received_qty: Mapped[int] = mapped_column(Integer, nullable=False)
     damaged_qty: Mapped[int] = mapped_column(Integer, default=0)
     rate: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
 
-    saree: Mapped["Saree"] = relationship()
+    item: Mapped["Item"] = relationship()

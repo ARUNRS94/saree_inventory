@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import api from '@/services/api';
-import type { JobWorkIssue, JobWorkReceipt, Vendor, Saree, PaginatedResponse } from '@/types';
+import type { JobWorkIssue, JobWorkReceipt, Vendor, Item, PaginatedResponse } from '@/types';
 import { PageHeader } from '@/components/PageHeader';
 import { FilterBar } from '@/components/FilterBar';
 import { DataTable, Pagination } from '@/components/DataTable';
@@ -20,12 +20,12 @@ export default function JobWorkPage() {
   const [dateTo, setDateTo] = useState('');
   const [loading, setLoading] = useState(true);
   const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [sarees, setSarees] = useState<Saree[]>([]);
+  const [items, setItems] = useState<Item[]>([]);
   const [openIssues, setOpenIssues] = useState<JobWorkIssue[]>([]);
   const [showIssueForm, setShowIssueForm] = useState(false);
   const [showReceiptForm, setShowReceiptForm] = useState(false);
-  const [issueForm, setIssueForm] = useState({ vendor_id: '', saree_id: '', issued_qty: 1, remarks: '' });
-  const [receiptForm, setReceiptForm] = useState({ issue_id: '', vendor_id: '', saree_id: '', received_qty: 0, rejected_qty: 0, process_cost: 0 });
+  const [issueForm, setIssueForm] = useState({ vendor_id: '', item_id: '', issued_qty: 1, remarks: '' });
+  const [receiptForm, setReceiptForm] = useState({ issue_id: '', vendor_id: '', item_id: '', received_qty: 0, rejected_qty: 0, process_cost: 0 });
   const [currentStock, setCurrentStock] = useState(0);
   const [pendingQty, setPendingQty] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -44,25 +44,25 @@ export default function JobWorkPage() {
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
     api.get('/vendors', { params: { page_size: 200 } }).then((r) => setVendors(r.data.items));
-    api.get('/sarees', { params: { page_size: 500 } }).then((r) => setSarees(r.data.items));
+    api.get('/items', { params: { page_size: 500 } }).then((r) => setItems(r.data.items));
     api.get('/job-work/issues', { params: { page_size: 200 } }).then((r) => setOpenIssues(r.data.items.filter((i: JobWorkIssue) => i.status !== 'CLOSED')));
   }, []);
 
   useEffect(() => {
-    if (issueForm.saree_id) api.get(`/inventory/stock/${issueForm.saree_id}`).then((r) => setCurrentStock(r.data.current_stock));
-  }, [issueForm.saree_id]);
+    if (issueForm.item_id) api.get(`/inventory/stock/${issueForm.item_id}`).then((r) => setCurrentStock(r.data.current_stock));
+  }, [issueForm.item_id]);
 
   useEffect(() => {
-    if (receiptForm.issue_id && receiptForm.saree_id)
-      api.get(`/job-work/issues/${receiptForm.issue_id}/pending-qty`, { params: { saree_id: receiptForm.saree_id } }).then((r) => setPendingQty(r.data.pending_qty));
-  }, [receiptForm.issue_id, receiptForm.saree_id]);
+    if (receiptForm.issue_id && receiptForm.item_id)
+      api.get(`/job-work/issues/${receiptForm.issue_id}/pending-qty`, { params: { item_id: receiptForm.item_id } }).then((r) => setPendingQty(r.data.pending_qty));
+  }, [receiptForm.issue_id, receiptForm.item_id]);
 
   const saveIssue = async (e: React.FormEvent) => {
     e.preventDefault(); setSaving(true); setError(''); setSuccess('');
     try {
       const res = await api.post('/job-work/issues', {
         vendor_id: Number(issueForm.vendor_id), remarks: issueForm.remarks || null,
-        items: [{ saree_id: Number(issueForm.saree_id), issued_qty: issueForm.issued_qty }],
+        items: [{ item_id: Number(issueForm.item_id), issued_qty: issueForm.issued_qty }],
       });
       setSuccess(`Job Work Issue ${res.data.issue_no} saved.`);
       setShowIssueForm(false); load();
@@ -77,7 +77,7 @@ export default function JobWorkPage() {
       const res = await api.post('/job-work/receipts', {
         issue_id: Number(receiptForm.issue_id),
         vendor_id: issue?.vendor_id || Number(receiptForm.vendor_id),
-        items: [{ saree_id: Number(receiptForm.saree_id), received_qty: receiptForm.received_qty, rejected_qty: receiptForm.rejected_qty, process_cost: receiptForm.process_cost }],
+        items: [{ item_id: Number(receiptForm.item_id), received_qty: receiptForm.received_qty, rejected_qty: receiptForm.rejected_qty, process_cost: receiptForm.process_cost }],
       });
       setSuccess(`Job Work Receipt ${res.data.receipt_no} saved.`);
       setShowReceiptForm(false); load();
@@ -106,10 +106,10 @@ export default function JobWorkPage() {
                 {vendors.map((v) => <option key={v.vendor_id} value={v.vendor_id}>{v.vendor_name} ({v.process_type})</option>)}
               </select>
             </div>
-            <div><label className="label">Saree *</label>
-              <select className="input" value={issueForm.saree_id} onChange={(e) => setIssueForm({ ...issueForm, saree_id: e.target.value })} required>
+            <div><label className="label">Item *</label>
+              <select className="input" value={issueForm.item_id} onChange={(e) => setIssueForm({ ...issueForm, item_id: e.target.value })} required>
                 <option value="">Select</option>
-                {sarees.map((s) => <option key={s.saree_id} value={s.saree_id}>{s.saree_code} - {s.saree_name}</option>)}
+                {items.map((s) => <option key={s.item_id} value={s.item_id}>{s.item_code} - {s.item_name}</option>)}
               </select>
             </div>
             <div><label className="label">Available Stock</label><p className="input bg-gray-50">{currentStock} pcs</p></div>
@@ -132,10 +132,10 @@ export default function JobWorkPage() {
                 {openIssues.map((i) => <option key={i.issue_id} value={i.issue_id}>{i.issue_no} ({i.vendor_name})</option>)}
               </select>
             </div>
-            <div><label className="label">Saree *</label>
-              <select className="input" value={receiptForm.saree_id} onChange={(e) => setReceiptForm({ ...receiptForm, saree_id: e.target.value })} required>
+            <div><label className="label">Item *</label>
+              <select className="input" value={receiptForm.item_id} onChange={(e) => setReceiptForm({ ...receiptForm, item_id: e.target.value })} required>
                 <option value="">Select</option>
-                {sarees.map((s) => <option key={s.saree_id} value={s.saree_id}>{s.saree_code} - {s.saree_name}</option>)}
+                {items.map((s) => <option key={s.item_id} value={s.item_id}>{s.item_code} - {s.item_name}</option>)}
               </select>
             </div>
             <div><label className="label">Pending Qty</label><p className="input bg-gray-50">{pendingQty}</p></div>
@@ -176,7 +176,7 @@ export default function JobWorkPage() {
                 { header: 'Issue No', accessor: 'issue_no' },
                 { header: 'Vendor', accessor: 'vendor_name' },
                 { header: 'Date', accessor: (r) => formatDate(r.issue_date) },
-                { header: 'Items', accessor: (r) => r.items.map((i) => `${i.saree_code} (${i.issued_qty})`).join(', '), hideOnMobile: true },
+                { header: 'Items', accessor: (r) => r.items.map((i) => `${i.item_code} (${i.issued_qty})`).join(', '), hideOnMobile: true },
                 { header: 'Status', accessor: (r) => <StatusBadge status={r.status} /> },
               ]} />
               <Pagination page={page} total={issues.total} pageSize={issues.page_size} onChange={setPage} />
@@ -190,7 +190,7 @@ export default function JobWorkPage() {
                 { header: 'Issue No', accessor: 'issue_no' },
                 { header: 'Vendor', accessor: 'vendor_name' },
                 { header: 'Date', accessor: (r) => formatDate(r.receipt_date) },
-                { header: 'Items', accessor: (r) => r.items.map((i) => `${i.saree_code} (${i.received_qty})`).join(', '), hideOnMobile: true },
+                { header: 'Items', accessor: (r) => r.items.map((i) => `${i.item_code} (${i.received_qty})`).join(', '), hideOnMobile: true },
               ]} />
               <Pagination page={page} total={receipts.total} pageSize={receipts.page_size} onChange={setPage} />
             </>

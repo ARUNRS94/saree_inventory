@@ -11,7 +11,7 @@ from app.core.database import Base
 PERMISSION_CATALOGUE: list[tuple[str, str, str]] = [
     ("users", "User Management", "Create, edit and deactivate users"),
     ("roles", "Access Management", "Create roles and assign permissions"),
-    ("masters", "Masters", "Manage sarees, suppliers and vendors"),
+    ("masters", "Masters", "Manage items, contacts and vendors"),
     ("imports", "Bulk Import", "Import master data from CSV files"),
     ("purchase", "Purchase", "Manage purchase orders"),
     ("grn", "GRN", "Manage goods receipt notes"),

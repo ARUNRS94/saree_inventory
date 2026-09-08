@@ -11,9 +11,9 @@ class StockLedgerResponse(BaseModel):
     transaction_date: date
     transaction_type: str
     reference_no: str
-    saree_id: int
-    saree_code: str | None = None
-    saree_name: str | None = None
+    item_id: int
+    item_code: str | None = None
+    item_name: str | None = None
     qty_in: int
     qty_out: int
     rate: Decimal
@@ -30,17 +30,17 @@ class StockLedgerListResponse(BaseModel):
 
 
 class StockSummaryResponse(BaseModel):
-    saree_id: int
-    saree_code: str
-    saree_name: str
-    fabric: str | None
+    item_id: int
+    item_code: str
+    item_name: str
+    item_type: str | None
     current_stock: int
 
 
 class StockValuationResponse(BaseModel):
-    saree_id: int
-    saree_code: str
-    saree_name: str
+    item_id: int
+    item_code: str
+    item_name: str
     current_stock: int
     latest_rate: Decimal
     value: Decimal
@@ -48,7 +48,7 @@ class StockValuationResponse(BaseModel):
 
 class CustomerIssueCreate(BaseModel):
     customer_id: int
-    saree_id: int
+    item_id: int
     quantity: int = Field(gt=0)
     reference: str | None = None
     remarks: str | None = None

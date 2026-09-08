@@ -15,9 +15,9 @@ router = APIRouter(prefix="/job-work", tags=["Job Work"])
 
 def _issue_to_response(issue) -> JobWorkIssueResponse:
     items = [JobWorkIssueItemResponse(
-        issue_item_id=item.issue_item_id, saree_id=item.saree_id,
-        saree_code=item.saree.saree_code if item.saree else None,
-        saree_name=item.saree.saree_name if item.saree else None,
+        issue_item_id=item.issue_item_id, item_id=item.item_id,
+        item_code=item.item.item_code if item.item else None,
+        item_name=item.item.item_name if item.item else None,
         issued_qty=item.issued_qty,
     ) for item in issue.items]
     return JobWorkIssueResponse(
@@ -29,9 +29,9 @@ def _issue_to_response(issue) -> JobWorkIssueResponse:
 
 def _receipt_to_response(receipt) -> JobWorkReceiptResponse:
     items = [JobWorkReceiptItemResponse(
-        receipt_item_id=item.receipt_item_id, saree_id=item.saree_id,
-        saree_code=item.saree.saree_code if item.saree else None,
-        saree_name=item.saree.saree_name if item.saree else None,
+        receipt_item_id=item.receipt_item_id, item_id=item.item_id,
+        item_code=item.item.item_code if item.item else None,
+        item_name=item.item.item_name if item.item else None,
         received_qty=item.received_qty, rejected_qty=item.rejected_qty, process_cost=item.process_cost,
     ) for item in receipt.items]
     return JobWorkReceiptResponse(
@@ -60,13 +60,13 @@ async def list_issues(
 @router.post("/issues", response_model=JobWorkIssueResponse, status_code=201)
 async def create_issue(body: JobWorkIssueCreate, db: AsyncSession = Depends(get_db), _user=Depends(get_current_user)):
     try:
-        lines = [(item.saree_id, item.issued_qty) for item in body.items]
+        lines = [(item.item_id, item.issued_qty) for item in body.items]
         issue = await JobWorkService(db).issue(body.vendor_id, lines, body.issue_date, body.remarks)
         from sqlalchemy.orm import selectinload
         from app.models.job_work import JobWorkIssue, JobWorkIssueItem
         issue = await db.get(JobWorkIssue, issue.issue_id, options=[
             selectinload(JobWorkIssue.vendor),
-            selectinload(JobWorkIssue.items).selectinload(JobWorkIssueItem.saree),
+            selectinload(JobWorkIssue.items).selectinload(JobWorkIssueItem.item),
         ])
         return _issue_to_response(issue)
     except ValueError as e:
@@ -74,8 +74,8 @@ async def create_issue(body: JobWorkIssueCreate, db: AsyncSession = Depends(get_
 
 
 @router.get("/issues/{issue_id}/pending-qty")
-async def get_pending_qty(issue_id: int, saree_id: int, db: AsyncSession = Depends(get_db), _user=Depends(get_current_user)):
-    qty = await JobWorkService(db).pending_issue_qty(issue_id, saree_id)
+async def get_pending_qty(issue_id: int, item_id: int, db: AsyncSession = Depends(get_db), _user=Depends(get_current_user)):
+    qty = await JobWorkService(db).pending_issue_qty(issue_id, item_id)
     return {"pending_qty": qty}
 
 
@@ -97,14 +97,14 @@ async def list_receipts(
 @router.post("/receipts", response_model=JobWorkReceiptResponse, status_code=201)
 async def create_receipt(body: JobWorkReceiptCreate, db: AsyncSession = Depends(get_db), _user=Depends(get_current_user)):
     try:
-        lines = [(item.saree_id, item.received_qty, item.rejected_qty, item.process_cost) for item in body.items]
+        lines = [(item.item_id, item.received_qty, item.rejected_qty, item.process_cost) for item in body.items]
         receipt = await JobWorkService(db).receive(body.issue_id, body.vendor_id, lines, body.receipt_date)
         from sqlalchemy.orm import selectinload
         from app.models.job_work import JobWorkReceipt, JobWorkReceiptItem
         receipt = await db.get(JobWorkReceipt, receipt.receipt_id, options=[
             selectinload(JobWorkReceipt.vendor),
             selectinload(JobWorkReceipt.issue),
-            selectinload(JobWorkReceipt.items).selectinload(JobWorkReceiptItem.saree),
+            selectinload(JobWorkReceipt.items).selectinload(JobWorkReceiptItem.item),
         ])
         return _receipt_to_response(receipt)
     except ValueError as e:

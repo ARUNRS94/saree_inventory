@@ -28,10 +28,10 @@ class JobWorkIssueItem(Base):
 
     issue_item_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     issue_id: Mapped[int] = mapped_column(ForeignKey("job_work_issues.issue_id"), nullable=False)
-    saree_id: Mapped[int] = mapped_column(ForeignKey("sarees.saree_id"), nullable=False)
+    item_id: Mapped[int] = mapped_column(ForeignKey("items.item_id"), nullable=False)
     issued_qty: Mapped[int] = mapped_column(Integer, nullable=False)
 
-    saree: Mapped["Saree"] = relationship()
+    item: Mapped["Item"] = relationship()
 
 
 class JobWorkReceipt(Base):
@@ -53,9 +53,9 @@ class JobWorkReceiptItem(Base):
 
     receipt_item_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     receipt_id: Mapped[int] = mapped_column(ForeignKey("job_work_receipts.receipt_id"), nullable=False)
-    saree_id: Mapped[int] = mapped_column(ForeignKey("sarees.saree_id"), nullable=False)
+    item_id: Mapped[int] = mapped_column(ForeignKey("items.item_id"), nullable=False)
     received_qty: Mapped[int] = mapped_column(Integer, nullable=False)
     rejected_qty: Mapped[int] = mapped_column(Integer, default=0)
     process_cost: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)
 
-    saree: Mapped["Saree"] = relationship()
+    item: Mapped["Item"] = relationship()

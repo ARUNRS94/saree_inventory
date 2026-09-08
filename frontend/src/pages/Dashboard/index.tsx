@@ -31,9 +31,9 @@ export default function DashboardPage() {
         <StatsCard title="Pending PO Qty" value={`${formatNumber(cards.pending_po_qty)} pcs`} icon={<ShoppingCart className="h-8 w-8" />} />
         <StatsCard title="Vendor WIP" value={`${formatNumber(cards.vendor_wip_qty)} pcs`} icon={<Wrench className="h-8 w-8" />} />
         <StatsCard title="Open PO Value" value={formatCurrency(cards.open_po_value)} icon={<ShoppingCart className="h-8 w-8" />} />
-        <StatsCard title="Active Sarees" value={formatNumber(cards.active_sarees)} icon={<Layers className="h-8 w-8" />} />
+        <StatsCard title="Active Items" value={formatNumber(cards.active_items)} icon={<Layers className="h-8 w-8" />} />
         <StatsCard title="Active Vendors" value={formatNumber(cards.active_vendors)} icon={<Factory className="h-8 w-8" />} />
-        <StatsCard title="Active Suppliers" value={formatNumber(cards.active_suppliers)} icon={<Users className="h-8 w-8" />} />
+        <StatsCard title="Active Contacts" value={formatNumber(cards.active_contacts)} icon={<Users className="h-8 w-8" />} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">

@@ -4,12 +4,13 @@ import { MainLayout } from '@/layouts/MainLayout';
 import LoginPage from '@/pages/Login';
 import SignupPage from '@/pages/Signup';
 import DashboardPage from '@/pages/Dashboard';
-import SareesPage from '@/pages/Sarees';
-import SuppliersPage from '@/pages/Suppliers';
+import ItemsPage from '@/pages/Items';
+import ContactsPage from '@/pages/Contacts';
 import VendorsPage from '@/pages/Vendors';
 import PurchaseOrdersPage from '@/pages/PurchaseOrders';
 import GRNPage from '@/pages/GRN';
 import JobWorkPage from '@/pages/JobWork';
+import CustomerIssuePage from '@/pages/CustomerIssue';
 import InventoryPage from '@/pages/Inventory';
 import ReportsPage from '@/pages/Reports';
 import UsersPage from '@/pages/Users';
@@ -33,11 +34,13 @@ export function AppRoutes() {
         <Route path="/signup" element={user ? <Navigate to="/" replace /> : <SignupPage />} />
         <Route path="/" element={<ProtectedRoute><MainLayout /></ProtectedRoute>}>
           <Route index element={<DashboardPage />} />
-          <Route path="sarees" element={<SareesPage />} />
-          <Route path="suppliers" element={<SuppliersPage />} />
+          <Route path="items" element={<ItemsPage />} />
+          <Route path="contacts" element={<ContactsPage />} />
           <Route path="vendors" element={<VendorsPage />} />
           <Route path="purchase-orders" element={<PurchaseOrdersPage />} />
           <Route path="grn" element={<GRNPage />} />
+          <Route path="customer-issue" element={<CustomerIssuePage />} />
+          {/* Vendors and Job Work stay routable by URL but are not in the nav. */}
           <Route path="job-work" element={<JobWorkPage />} />
           <Route path="inventory" element={<InventoryPage />} />
           <Route path="reports" element={<ReportsPage />} />

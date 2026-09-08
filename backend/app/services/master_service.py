@@ -3,25 +3,60 @@ from __future__ import annotations
 from sqlalchemy import or_, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.saree import Saree
-from app.models.supplier import Supplier
+from app.models.item import Item
+from app.models.contact import Contact
 from app.models.vendor import Vendor
 from app.models.vendor_process_type import VendorProcessType
 
-CONTACT_TYPES = ["RM vendor", "Sub vendor", "Customer"]
+RM_VENDOR = "Raw Material Vendor"
+SUB_VENDOR = "Sub vendor"
+CUSTOMER = "Customer"
+
+CONTACT_TYPES = [RM_VENDOR, SUB_VENDOR, CUSTOMER]
+
+# Older data and CSV files use the previous spelling.
+CONTACT_TYPE_ALIASES = {
+    "rm vendor": RM_VENDOR,
+    "raw material vendor": RM_VENDOR,
+    "sub vendor": SUB_VENDOR,
+    "customer": CUSTOMER,
+}
+
 ITEM_TYPES = ["RM", "Sub process", "FG"]
 
+# Codes are what we store; labels are what users see and what reports print.
+ITEM_TYPE_LABELS = {"RM": "Raw Material", "Sub process": "Sub Process", "FG": "Finished Goods"}
+ITEM_TYPE_ALIASES = {label.lower(): code for code, label in ITEM_TYPE_LABELS.items()}
+ITEM_TYPE_ALIASES.update({code.lower(): code for code in ITEM_TYPES})
+
+
+def item_type_label(code: str | None) -> str:
+    return ITEM_TYPE_LABELS.get(code or "", code or "")
+
+
+def normalise_item_type(value: str | None) -> str | None:
+    """Map 'Raw Material' or 'rm' onto the stored 'RM' code."""
+    if not value:
+        return None
+    return ITEM_TYPE_ALIASES.get(value.strip().lower())
+
+
+def normalise_contact_type(value: str | None) -> str | None:
+    if not value:
+        return None
+    return CONTACT_TYPE_ALIASES.get(value.strip().lower())
+
+
 # Whitelisted sort columns, keyed by the value the client sends.
-SAREE_SORTS = {
-    "saree_code": Saree.saree_code, "saree_name": Saree.saree_name,
-    "category": Saree.category, "fabric": Saree.fabric,
-    "design_name": Saree.design_name, "color": Saree.color,
-    "created_date": Saree.created_date,
+ITEM_SORTS = {
+    "item_code": Item.item_code, "item_name": Item.item_name,
+    "item_type": Item.item_type, "remarks": Item.remarks,
+    "color": Item.color, "created_date": Item.created_date,
 }
-SUPPLIER_SORTS = {
-    "supplier_name": Supplier.supplier_name, "contact_person": Supplier.contact_person,
-    "phone": Supplier.phone, "gst_no": Supplier.gst_no,
-    "contact_type": Supplier.contact_type, "created_date": Supplier.created_date,
+CONTACT_SORTS = {
+    "contact_name": Contact.contact_name, "contact_person": Contact.contact_person,
+    "phone": Contact.phone, "gst_no": Contact.gst_no,
+    "contact_type": Contact.contact_type, "created_date": Contact.created_date,
 }
 VENDOR_SORTS = {
     "vendor_name": Vendor.vendor_name, "process_type": Vendor.process_type,
@@ -45,18 +80,19 @@ class MasterService:
         self.session = session
 
     # --- Contacts ---
-    async def create_contact(self, name: str, contact_type: str, **values: object) -> Supplier:
+    async def create_contact(self, name: str, contact_type: str, **values: object) -> Contact:
         if not name.strip():
             raise ValueError("Contact name is required.")
-        if contact_type not in CONTACT_TYPES:
+        resolved = normalise_contact_type(contact_type)
+        if resolved is None:
             raise ValueError("Select a valid contact type.")
-        contact = Supplier(supplier_name=name.strip(), contact_type=contact_type, **values)
+        contact = Contact(contact_name=name.strip(), contact_type=resolved, **values)
         self.session.add(contact)
         await self.session.flush()
         return contact
 
-    async def update_contact(self, supplier_id: int, **values: object) -> Supplier:
-        contact = await self.session.get(Supplier, supplier_id)
+    async def update_contact(self, contact_id: int, **values: object) -> Contact:
+        contact = await self.session.get(Contact, contact_id)
         if contact is None:
             raise ValueError("Contact not found.")
         for key, val in values.items():
@@ -67,24 +103,24 @@ class MasterService:
 
     async def search_contacts(self, text: str = "", contact_type: str | None = None,
                               page: int = 1, page_size: int = 50,
-                              sort_by: str | None = None, sort_dir: str | None = None) -> tuple[list[Supplier], int]:
-        stmt = select(Supplier).where(Supplier.is_active.is_(True))
-        count_stmt = select(func.count()).select_from(Supplier).where(Supplier.is_active.is_(True))
+                              sort_by: str | None = None, sort_dir: str | None = None) -> tuple[list[Contact], int]:
+        stmt = select(Contact).where(Contact.is_active.is_(True))
+        count_stmt = select(func.count()).select_from(Contact).where(Contact.is_active.is_(True))
         if contact_type:
-            stmt = stmt.where(Supplier.contact_type == contact_type)
-            count_stmt = count_stmt.where(Supplier.contact_type == contact_type)
+            stmt = stmt.where(Contact.contact_type == contact_type)
+            count_stmt = count_stmt.where(Contact.contact_type == contact_type)
         if text:
             like = f"%{text}%"
             text_filter = or_(
-                Supplier.supplier_name.ilike(like),
-                Supplier.contact_person.ilike(like),
-                Supplier.phone.ilike(like),
-                Supplier.gst_no.ilike(like),
+                Contact.contact_name.ilike(like),
+                Contact.contact_person.ilike(like),
+                Contact.phone.ilike(like),
+                Contact.gst_no.ilike(like),
             )
             stmt = stmt.where(text_filter)
             count_stmt = count_stmt.where(text_filter)
         total = await self.session.scalar(count_stmt) or 0
-        stmt = apply_sort(stmt, SUPPLIER_SORTS, sort_by, sort_dir, Supplier.supplier_name)
+        stmt = apply_sort(stmt, CONTACT_SORTS, sort_by, sort_dir, Contact.contact_name)
         stmt = stmt.offset((page - 1) * page_size).limit(page_size)
         result = await self.session.execute(stmt)
         return list(result.scalars().all()), total
@@ -131,49 +167,49 @@ class MasterService:
         result = await self.session.execute(stmt)
         return list(result.scalars().all()), total
 
-    # --- Sarees ---
-    async def create_saree(self, saree_code: str, saree_name: str, **values: object) -> Saree:
-        if not saree_code.strip() or not saree_name.strip():
+    # --- Items ---
+    async def create_item(self, item_code: str, item_name: str, **values: object) -> Item:
+        if not item_code.strip() or not item_name.strip():
             raise ValueError("Item code and name are required.")
-        item_type = values.get("fabric") or "FG"
+        item_type = values.get("item_type") or "FG"
         if item_type not in ITEM_TYPES:
             raise ValueError("Select a valid item type.")
-        saree = Saree(saree_code=saree_code.strip().upper(), saree_name=saree_name.strip(), **values)
-        self.session.add(saree)
+        item = Item(item_code=item_code.strip().upper(), item_name=item_name.strip(), **values)
+        self.session.add(item)
         await self.session.flush()
-        return saree
+        return item
 
-    async def update_saree(self, saree_id: int, **values: object) -> Saree:
-        saree = await self.session.get(Saree, saree_id)
-        if saree is None:
+    async def update_item(self, item_id: int, **values: object) -> Item:
+        item = await self.session.get(Item, item_id)
+        if item is None:
             raise ValueError("Item not found.")
         for key, val in values.items():
             if val is not None:
-                if key == "saree_code":
+                if key == "item_code":
                     val = str(val).strip().upper()
-                setattr(saree, key, val)
+                setattr(item, key, val)
         await self.session.flush()
-        return saree
+        return item
 
-    async def search_sarees(self, text: str = "", item_type: str | None = None,
+    async def search_items(self, text: str = "", item_type: str | None = None,
                             page: int = 1, page_size: int = 50,
-                            sort_by: str | None = None, sort_dir: str | None = None) -> tuple[list[Saree], int]:
-        stmt = select(Saree)
-        count_stmt = select(func.count()).select_from(Saree)
+                            sort_by: str | None = None, sort_dir: str | None = None) -> tuple[list[Item], int]:
+        stmt = select(Item)
+        count_stmt = select(func.count()).select_from(Item)
         if item_type:
-            stmt = stmt.where(Saree.fabric == item_type)
-            count_stmt = count_stmt.where(Saree.fabric == item_type)
+            stmt = stmt.where(Item.item_type == item_type)
+            count_stmt = count_stmt.where(Item.item_type == item_type)
         if text:
             like = f"%{text}%"
             text_filter = or_(
-                Saree.saree_code.ilike(like), Saree.saree_name.ilike(like),
-                Saree.design_name.ilike(like), Saree.color.ilike(like),
-                Saree.category.ilike(like), Saree.fabric.ilike(like),
+                Item.item_code.ilike(like), Item.item_name.ilike(like),
+                Item.remarks.ilike(like), Item.color.ilike(like),
+                Item.item_type.ilike(like),
             )
             stmt = stmt.where(text_filter)
             count_stmt = count_stmt.where(text_filter)
         total = await self.session.scalar(count_stmt) or 0
-        stmt = apply_sort(stmt, SAREE_SORTS, sort_by, sort_dir, Saree.saree_code)
+        stmt = apply_sort(stmt, ITEM_SORTS, sort_by, sort_dir, Item.item_code)
         stmt = stmt.offset((page - 1) * page_size).limit(page_size)
         result = await self.session.execute(stmt)
         return list(result.scalars().all()), total

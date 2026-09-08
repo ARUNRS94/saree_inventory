@@ -44,21 +44,21 @@ export interface Role {
 /** @deprecated use Role */
 export type RoleInfo = Role;
 
-export interface Saree {
-  saree_id: number;
-  saree_code: string;
-  saree_name: string;
+export interface Item {
+  item_id: number;
+  item_code: string;
+  item_name: string;
   category: string | null;
-  fabric: string | null;
-  design_name: string | null;
+  item_type: string | null;
+  remarks: string | null;
   color: string | null;
   unit: string;
   created_date: string | null;
 }
 
-export interface Supplier {
-  supplier_id: number;
-  supplier_name: string;
+export interface Contact {
+  contact_id: number;
+  contact_name: string;
   contact_person: string | null;
   phone: string | null;
   gst_no: string | null;
@@ -89,14 +89,14 @@ export interface VendorProcessType {
 
 export interface POItem {
   po_item_id: number;
-  saree_id: number;
-  saree_code: string | null;
-  saree_name: string | null;
-  stock_out_saree_id: number | null;
-  stock_out_saree_code: string | null;
-  target_fg_saree_id: number | null;
-  target_fg_saree_code: string | null;
-  target_fg_saree_name: string | null;
+  item_id: number;
+  item_code: string | null;
+  item_name: string | null;
+  stock_out_item_id: number | null;
+  stock_out_item_code: string | null;
+  target_fg_item_id: number | null;
+  target_fg_item_code: string | null;
+  target_fg_item_name: string | null;
   ordered_qty: number;
   rate: number;
   amount: number;
@@ -105,8 +105,8 @@ export interface POItem {
 export interface PurchaseOrder {
   po_id: number;
   po_number: string;
-  supplier_id: number;
-  supplier_name: string | null;
+  contact_id: number;
+  contact_name: string | null;
   contact_type: string | null;
   po_date: string;
   expected_date: string | null;
@@ -117,9 +117,9 @@ export interface PurchaseOrder {
 
 export interface GRNItem {
   grn_item_id: number;
-  saree_id: number;
-  saree_code: string | null;
-  saree_name: string | null;
+  item_id: number;
+  item_code: string | null;
+  item_name: string | null;
   received_qty: number;
   damaged_qty: number;
   rate: number;
@@ -137,9 +137,9 @@ export interface GRN {
 
 export interface JobWorkIssueItem {
   issue_item_id: number;
-  saree_id: number;
-  saree_code: string | null;
-  saree_name: string | null;
+  item_id: number;
+  item_code: string | null;
+  item_name: string | null;
   issued_qty: number;
 }
 
@@ -156,9 +156,9 @@ export interface JobWorkIssue {
 
 export interface JobWorkReceiptItem {
   receipt_item_id: number;
-  saree_id: number;
-  saree_code: string | null;
-  saree_name: string | null;
+  item_id: number;
+  item_code: string | null;
+  item_name: string | null;
   received_qty: number;
   rejected_qty: number;
   process_cost: number;
@@ -176,17 +176,17 @@ export interface JobWorkReceipt {
 }
 
 export interface StockSummary {
-  saree_id: number;
-  saree_code: string;
-  saree_name: string;
-  fabric: string | null;
+  item_id: number;
+  item_code: string;
+  item_name: string;
+  item_type: string | null;
   current_stock: number;
 }
 
 export interface StockValuation {
-  saree_id: number;
-  saree_code: string;
-  saree_name: string;
+  item_id: number;
+  item_code: string;
+  item_name: string;
   current_stock: number;
   latest_rate: number;
   value: number;
@@ -197,9 +197,9 @@ export interface StockLedgerEntry {
   transaction_date: string;
   transaction_type: string;
   reference_no: string;
-  saree_id: number;
-  saree_code: string | null;
-  saree_name: string | null;
+  item_id: number;
+  item_code: string | null;
+  item_name: string | null;
   qty_in: number;
   qty_out: number;
   rate: number;
@@ -212,9 +212,9 @@ export interface DashboardCards {
   open_po_value: number;
   pending_po_qty: number;
   vendor_wip_qty: number;
-  active_sarees: number;
+  active_items: number;
   active_vendors: number;
-  active_suppliers: number;
+  active_contacts: number;
 }
 
 export interface DashboardData {

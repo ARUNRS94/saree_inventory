@@ -1,12 +1,13 @@
 import { useEffect, useState, useCallback } from 'react';
 import api from '@/services/api';
-import type { GRN, PurchaseOrder, Saree, PaginatedResponse } from '@/types';
+import type { GRN, PurchaseOrder, Item, PaginatedResponse } from '@/types';
 import { PageHeader } from '@/components/PageHeader';
 import { FilterBar } from '@/components/FilterBar';
 import { DataTable, Pagination } from '@/components/DataTable';
 import { LoadingState, EmptyState } from '@/components/LoadingState';
 import { useConfirmDialog } from '@/components/ConfirmDialog';
 import { formatDate } from '@/utils/format';
+import { SUB_VENDOR } from '@/utils/contactTypes';
 
 export default function GRNPage() {
   const [data, setData] = useState<PaginatedResponse<GRN>>({ items: [], total: 0, page: 1, page_size: 50 });
@@ -19,7 +20,7 @@ export default function GRNPage() {
   const [openPOs, setOpenPOs] = useState<PurchaseOrder[]>([]);
   const [stockInItems, setStockInItems] = useState<{ id: number; label: string }[]>([]);
   const [pendingQty, setPendingQty] = useState(0);
-  const [form, setForm] = useState({ po_id: '', saree_id: '', received_qty: 0, damaged_qty: 0, rate: 0, remarks: '' });
+  const [form, setForm] = useState({ po_id: '', item_id: '', received_qty: 0, damaged_qty: 0, rate: 0, remarks: '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -41,29 +42,29 @@ export default function GRNPage() {
 
   useEffect(() => {
     if (!selectedPO) { setStockInItems([]); return; }
-    if (selectedPO.contact_type === 'Sub vendor') {
-      const fgIds = new Set(selectedPO.items.map((i) => i.target_fg_saree_id).filter(Boolean));
-      api.get('/sarees', { params: { page_size: 500 } }).then((r) => {
-        setStockInItems(r.data.items.filter((s: Saree) => fgIds.has(s.saree_id)).map((s: Saree) => ({ id: s.saree_id, label: `${s.saree_code} - ${s.saree_name} (FG)` })));
+    if (selectedPO.contact_type === SUB_VENDOR) {
+      const fgIds = new Set(selectedPO.items.map((i) => i.target_fg_item_id).filter(Boolean));
+      api.get('/items', { params: { page_size: 500 } }).then((r) => {
+        setStockInItems(r.data.items.filter((s: Item) => fgIds.has(s.item_id)).map((s: Item) => ({ id: s.item_id, label: `${s.item_code} - ${s.item_name} (FG)` })));
       });
     } else {
-      setStockInItems(selectedPO.items.map((i) => ({ id: i.saree_id, label: `${i.saree_code} - ${i.saree_name} (RM)` })));
+      setStockInItems(selectedPO.items.map((i) => ({ id: i.item_id, label: `${i.item_code} - ${i.item_name} (RM)` })));
     }
   }, [selectedPO]);
 
   useEffect(() => {
-    if (!form.po_id || !form.saree_id) { setPendingQty(0); return; }
-    const isSubVendor = selectedPO?.contact_type === 'Sub vendor';
-    api.get(`/purchase-orders/${form.po_id}/pending-qty`, { params: isSubVendor ? {} : { saree_id: form.saree_id } })
+    if (!form.po_id || !form.item_id) { setPendingQty(0); return; }
+    const isSubVendor = selectedPO?.contact_type === SUB_VENDOR;
+    api.get(`/purchase-orders/${form.po_id}/pending-qty`, { params: isSubVendor ? {} : { item_id: form.item_id } })
       .then((r) => setPendingQty(r.data.pending_qty));
     // Set rate from PO
     if (selectedPO) {
       const poItem = selectedPO.items[0];
       if (poItem) setForm((f) => ({ ...f, rate: poItem.rate }));
     }
-  }, [form.po_id, form.saree_id, selectedPO]);
+  }, [form.po_id, form.item_id, selectedPO]);
 
-  const openNew = () => { setForm({ po_id: '', saree_id: '', received_qty: 0, damaged_qty: 0, rate: 0, remarks: '' }); setShowForm(true); setError(''); };
+  const openNew = () => { setForm({ po_id: '', item_id: '', received_qty: 0, damaged_qty: 0, rate: 0, remarks: '' }); setShowForm(true); setError(''); };
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -72,7 +73,7 @@ export default function GRNPage() {
     try {
       const res = await api.post('/grns', {
         po_id: Number(form.po_id), grn_date: null, remarks: form.remarks || null,
-        items: [{ saree_id: Number(form.saree_id), received_qty: form.received_qty, damaged_qty: form.damaged_qty, rate: form.rate }],
+        items: [{ item_id: Number(form.item_id), received_qty: form.received_qty, damaged_qty: form.damaged_qty, rate: form.rate }],
       });
       setSuccess(`GRN ${res.data.grn_number} saved and stock updated.`);
       setShowForm(false); load();
@@ -92,13 +93,13 @@ export default function GRNPage() {
           <h3 className="font-semibold mb-4">New GRN</h3>
           <form onSubmit={save} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <div><label className="label">Purchase Order *</label>
-              <select className="input" value={form.po_id} onChange={(e) => setForm({ ...form, po_id: e.target.value, saree_id: '' })} required>
+              <select className="input" value={form.po_id} onChange={(e) => setForm({ ...form, po_id: e.target.value, item_id: '' })} required>
                 <option value="">Select</option>
-                {openPOs.map((po) => <option key={po.po_id} value={po.po_id}>{po.po_number} - {po.supplier_name} ({po.contact_type})</option>)}
+                {openPOs.map((po) => <option key={po.po_id} value={po.po_id}>{po.po_number} - {po.contact_name} ({po.contact_type})</option>)}
               </select>
             </div>
             <div><label className="label">Stock In Item *</label>
-              <select className="input" value={form.saree_id} onChange={(e) => setForm({ ...form, saree_id: e.target.value })} required>
+              <select className="input" value={form.item_id} onChange={(e) => setForm({ ...form, item_id: e.target.value })} required>
                 <option value="">Select</option>
                 {stockInItems.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
               </select>
@@ -129,7 +130,7 @@ export default function GRNPage() {
               { header: 'GRN No', accessor: 'grn_number' },
               { header: 'PO', accessor: 'po_number' },
               { header: 'Date', accessor: (r) => formatDate(r.grn_date) },
-              { header: 'Items', accessor: (r) => r.items.map((i) => `${i.saree_code} (${i.received_qty})`).join(', '), hideOnMobile: true },
+              { header: 'Items', accessor: (r) => r.items.map((i) => `${i.item_code} (${i.received_qty})`).join(', '), hideOnMobile: true },
               { header: 'Total Received', accessor: (r) => r.items.reduce((s, i) => s + i.received_qty, 0) },
             ]} />
             <Pagination page={page} total={data.total} pageSize={data.page_size} onChange={setPage} />

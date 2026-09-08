@@ -5,6 +5,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { DataTable } from '@/components/DataTable';
 import { LoadingState, EmptyState } from '@/components/LoadingState';
 import { formatCurrency } from '@/utils/format';
+import { itemTypeLabel } from '@/utils/itemTypes';
 import { Download } from 'lucide-react';
 
 export default function ReportsPage() {
@@ -59,19 +60,19 @@ export default function ReportsPage() {
       <div className="card">
         {loading ? <LoadingState /> : tab === 'stock' ? (
           stock.length === 0 ? <EmptyState /> : (
-            <DataTable keyField="saree_id" data={stock} columns={[
-              { header: 'Code', accessor: 'saree_code' },
-              { header: 'Name', accessor: 'saree_name' },
-              { header: 'Type', accessor: 'fabric' },
+            <DataTable keyField="item_id" data={stock} columns={[
+              { header: 'Code', accessor: 'item_code' },
+              { header: 'Name', accessor: 'item_name' },
+              { header: 'Type', accessor: (s) => itemTypeLabel(s.item_type) },
               { header: 'Stock', accessor: 'current_stock', className: 'font-semibold' },
             ]} />
           )
         ) : (
           valuation.length === 0 ? <EmptyState /> : (
             <>
-              <DataTable keyField="saree_id" data={valuation} columns={[
-                { header: 'Code', accessor: 'saree_code' },
-                { header: 'Name', accessor: 'saree_name' },
+              <DataTable keyField="item_id" data={valuation} columns={[
+                { header: 'Code', accessor: 'item_code' },
+                { header: 'Name', accessor: 'item_name' },
                 { header: 'Stock', accessor: 'current_stock' },
                 { header: 'Rate', accessor: (r) => formatCurrency(r.latest_rate), hideOnMobile: true },
                 { header: 'Value', accessor: (r) => formatCurrency(r.value), className: 'font-semibold' },

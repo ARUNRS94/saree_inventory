@@ -4,13 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user, get_db
-from app.schemas.supplier import SupplierCreate, SupplierListResponse, SupplierResponse, SupplierUpdate
+from app.schemas.contact import ContactCreate, ContactListResponse, ContactResponse, ContactUpdate
 from app.services.master_service import MasterService
 
-router = APIRouter(prefix="/suppliers", tags=["Suppliers"])
+router = APIRouter(prefix="/contacts", tags=["Contacts"])
 
 
-@router.get("", response_model=SupplierListResponse)
+@router.get("", response_model=ContactListResponse)
 async def list_suppliers(
     search: str = "", contact_type: str | None = None,
     page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=200),
@@ -18,29 +18,29 @@ async def list_suppliers(
     db: AsyncSession = Depends(get_db), _user=Depends(get_current_user),
 ):
     items, total = await MasterService(db).search_contacts(search, contact_type, page, page_size, sort_by, sort_dir)
-    return SupplierListResponse(
-        items=[SupplierResponse.model_validate(s) for s in items],
+    return ContactListResponse(
+        items=[ContactResponse.model_validate(s) for s in items],
         total=total, page=page, page_size=page_size,
     )
 
 
-@router.post("", response_model=SupplierResponse, status_code=201)
-async def create_supplier(body: SupplierCreate, db: AsyncSession = Depends(get_db), _user=Depends(get_current_user)):
+@router.post("", response_model=ContactResponse, status_code=201)
+async def create_supplier(body: ContactCreate, db: AsyncSession = Depends(get_db), _user=Depends(get_current_user)):
     try:
         contact = await MasterService(db).create_contact(
-            body.supplier_name, body.contact_type,
+            body.contact_name, body.contact_type,
             contact_person=body.contact_person, phone=body.phone,
             gst_no=body.gst_no, address=body.address,
         )
-        return SupplierResponse.model_validate(contact)
+        return ContactResponse.model_validate(contact)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
 
-@router.put("/{supplier_id}", response_model=SupplierResponse)
-async def update_supplier(supplier_id: int, body: SupplierUpdate, db: AsyncSession = Depends(get_db), _user=Depends(get_current_user)):
+@router.put("/{contact_id}", response_model=ContactResponse)
+async def update_supplier(contact_id: int, body: ContactUpdate, db: AsyncSession = Depends(get_db), _user=Depends(get_current_user)):
     try:
-        contact = await MasterService(db).update_contact(supplier_id, **body.model_dump(exclude_unset=True))
-        return SupplierResponse.model_validate(contact)
+        contact = await MasterService(db).update_contact(contact_id, **body.model_dump(exclude_unset=True))
+        return ContactResponse.model_validate(contact)
     except ValueError as e:
         raise HTTPException(400, str(e))

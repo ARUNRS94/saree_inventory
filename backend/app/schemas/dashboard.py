@@ -11,9 +11,9 @@ class DashboardCardData(BaseModel):
     open_po_value: Decimal
     pending_po_qty: int
     vendor_wip_qty: int
-    active_sarees: int
+    active_items: int
     active_vendors: int
-    active_suppliers: int
+    active_contacts: int
 
 
 class PurchaseTrendItem(BaseModel):

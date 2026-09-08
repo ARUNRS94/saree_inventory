@@ -1,6 +1,6 @@
 # Inventory Management
 
-A responsive web-based ERP application for managing saree inventory, purchases, goods receipts, and job work operations. Converted from a PySide6 desktop application to a modern web stack.
+A responsive web-based ERP application for managing item inventory, purchases, goods receipts, and job work operations. Converted from a PySide6 desktop application to a modern web stack.
 
 ## Architecture
 
@@ -140,7 +140,7 @@ The script will:
 1. Back up the original SQLite file
 2. Copy all data to PostgreSQL
 3. Validate record counts for all tables
-4. Compare stock balances by saree
+4. Compare stock balances by item
 
 ## Environment Variables
 

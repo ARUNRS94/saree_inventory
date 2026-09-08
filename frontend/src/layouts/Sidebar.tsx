@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Package, Users, Factory, ShoppingCart, ClipboardCheck, Wrench, BarChart3, Settings, X, Layers, Shield, KeyRound } from 'lucide-react';
+import { LayoutDashboard, Package, Users, ShoppingCart, ClipboardCheck, BarChart3, Settings, X, Layers, Shield, KeyRound, Truck } from 'lucide-react';
 import clsx from 'clsx';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSettings } from '@/contexts/SettingsContext';
@@ -7,12 +7,11 @@ import { useSettings } from '@/contexts/SettingsContext';
 const links = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/inventory', label: 'Inventory', icon: Package },
-  { to: '/purchase-orders', label: 'Purchase Orders', icon: ShoppingCart },
+  { to: '/purchase-orders', label: 'Purchase', icon: ShoppingCart },
   { to: '/grn', label: 'GRN', icon: ClipboardCheck },
-  { to: '/job-work', label: 'Job Work', icon: Wrench },
-  { to: '/sarees', label: 'Sarees', icon: Layers },
-  { to: '/suppliers', label: 'Suppliers', icon: Users },
-  { to: '/vendors', label: 'Vendors', icon: Factory },
+  { to: '/customer-issue', label: 'Customer Issue', icon: Truck },
+  { to: '/items', label: 'Items', icon: Layers },
+  { to: '/contacts', label: 'Contacts', icon: Users },
   { to: '/reports', label: 'Reports', icon: BarChart3 },
 ];
 

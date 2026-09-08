@@ -19,7 +19,7 @@ async def stock_csv(db: AsyncSession = Depends(get_db), _user=Depends(get_curren
     output = io.StringIO()
     output.write("Item Code,Item Name,Type,Current Stock\n")
     for r in rows:
-        output.write(f"{r['saree_code']},{r['saree_name']},{r['fabric']},{r['current_stock']}\n")
+        output.write(f"{r['item_code']},{r['item_name']},{r['item_type']},{r['current_stock']}\n")
     output.seek(0)
     return StreamingResponse(
         io.BytesIO(output.getvalue().encode("utf-8")),
@@ -34,7 +34,7 @@ async def valuation_csv(db: AsyncSession = Depends(get_db), _user=Depends(get_cu
     output = io.StringIO()
     output.write("Item Code,Item Name,Current Stock,Latest Rate,Value\n")
     for r in rows:
-        output.write(f"{r['saree_code']},{r['saree_name']},{r['current_stock']},{r['latest_rate']},{r['value']}\n")
+        output.write(f"{r['item_code']},{r['item_name']},{r['current_stock']},{r['latest_rate']},{r['value']}\n")
     output.seek(0)
     return StreamingResponse(
         io.BytesIO(output.getvalue().encode("utf-8")),
@@ -54,7 +54,7 @@ async def stock_pdf(db: AsyncSession = Depends(get_db), _user=Depends(get_curren
     doc = SimpleDocTemplate(buffer, pagesize=A4)
     data = [["Item Code", "Item Name", "Type", "Current Stock"]]
     for r in rows:
-        data.append([r["saree_code"], r["saree_name"], r["fabric"], str(r["current_stock"])])
+        data.append([r["item_code"], r["item_name"], r["item_type"], str(r["current_stock"])])
     table = Table(data)
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2563eb")),
@@ -82,7 +82,7 @@ async def valuation_pdf(db: AsyncSession = Depends(get_db), _user=Depends(get_cu
     doc = SimpleDocTemplate(buffer, pagesize=A4)
     data = [["Item Code", "Item Name", "Stock", "Rate", "Value"]]
     for r in rows:
-        data.append([r["saree_code"], r["saree_name"], str(r["current_stock"]), str(r["latest_rate"]), str(r["value"])])
+        data.append([r["item_code"], r["item_name"], str(r["current_stock"]), str(r["latest_rate"]), str(r["value"])])
     table = Table(data)
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2563eb")),

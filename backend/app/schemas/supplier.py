@@ -5,8 +5,8 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 
-class SupplierCreate(BaseModel):
-    supplier_name: str = Field(min_length=1, max_length=200)
+class ContactCreate(BaseModel):
+    contact_name: str = Field(min_length=1, max_length=200)
     contact_person: str | None = None
     phone: str | None = None
     gst_no: str | None = None
@@ -14,8 +14,8 @@ class SupplierCreate(BaseModel):
     contact_type: str = "RM vendor"
 
 
-class SupplierUpdate(BaseModel):
-    supplier_name: str | None = None
+class ContactUpdate(BaseModel):
+    contact_name: str | None = None
     contact_person: str | None = None
     phone: str | None = None
     gst_no: str | None = None
@@ -24,9 +24,9 @@ class SupplierUpdate(BaseModel):
     is_active: bool | None = None
 
 
-class SupplierResponse(BaseModel):
-    supplier_id: int
-    supplier_name: str
+class ContactResponse(BaseModel):
+    contact_id: int
+    contact_name: str
     contact_person: str | None
     phone: str | None
     gst_no: str | None
@@ -38,8 +38,8 @@ class SupplierResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class SupplierListResponse(BaseModel):
-    items: list[SupplierResponse]
+class ContactListResponse(BaseModel):
+    items: list[ContactResponse]
     total: int
     page: int
     page_size: int
