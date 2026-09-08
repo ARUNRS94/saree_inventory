@@ -14,9 +14,10 @@ router = APIRouter(prefix="/suppliers", tags=["Suppliers"])
 async def list_suppliers(
     search: str = "", contact_type: str | None = None,
     page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=200),
+    sort_by: str | None = None, sort_dir: str = Query("asc", pattern="^(asc|desc)$"),
     db: AsyncSession = Depends(get_db), _user=Depends(get_current_user),
 ):
-    items, total = await MasterService(db).search_contacts(search, contact_type, page, page_size)
+    items, total = await MasterService(db).search_contacts(search, contact_type, page, page_size, sort_by, sort_dir)
     return SupplierListResponse(
         items=[SupplierResponse.model_validate(s) for s in items],
         total=total, page=page, page_size=page_size,

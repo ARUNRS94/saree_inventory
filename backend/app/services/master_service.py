@@ -11,6 +11,34 @@ from app.models.vendor_process_type import VendorProcessType
 CONTACT_TYPES = ["RM vendor", "Sub vendor", "Customer"]
 ITEM_TYPES = ["RM", "Sub process", "FG"]
 
+# Whitelisted sort columns, keyed by the value the client sends.
+SAREE_SORTS = {
+    "saree_code": Saree.saree_code, "saree_name": Saree.saree_name,
+    "category": Saree.category, "fabric": Saree.fabric,
+    "design_name": Saree.design_name, "color": Saree.color,
+    "created_date": Saree.created_date,
+}
+SUPPLIER_SORTS = {
+    "supplier_name": Supplier.supplier_name, "contact_person": Supplier.contact_person,
+    "phone": Supplier.phone, "gst_no": Supplier.gst_no,
+    "contact_type": Supplier.contact_type, "created_date": Supplier.created_date,
+}
+VENDOR_SORTS = {
+    "vendor_name": Vendor.vendor_name, "process_type": Vendor.process_type,
+    "contact_person": Vendor.contact_person, "phone": Vendor.phone,
+    "gst_no": Vendor.gst_no, "created_date": Vendor.created_date,
+}
+PROCESS_TYPE_SORTS = {
+    "process_type": VendorProcessType.process_type,
+    "created_date": VendorProcessType.created_date,
+}
+
+
+def apply_sort(stmt, allowed: dict, sort_by: str | None, sort_dir: str | None, default):
+    """Order by a whitelisted column; unknown names fall back to the default."""
+    column = allowed.get(sort_by or "", default)
+    return stmt.order_by(column.desc() if (sort_dir or "").lower() == "desc" else column.asc())
+
 
 class MasterService:
     def __init__(self, session: AsyncSession) -> None:
@@ -38,7 +66,8 @@ class MasterService:
         return contact
 
     async def search_contacts(self, text: str = "", contact_type: str | None = None,
-                              page: int = 1, page_size: int = 50) -> tuple[list[Supplier], int]:
+                              page: int = 1, page_size: int = 50,
+                              sort_by: str | None = None, sort_dir: str | None = None) -> tuple[list[Supplier], int]:
         stmt = select(Supplier).where(Supplier.is_active.is_(True))
         count_stmt = select(func.count()).select_from(Supplier).where(Supplier.is_active.is_(True))
         if contact_type:
@@ -55,7 +84,8 @@ class MasterService:
             stmt = stmt.where(text_filter)
             count_stmt = count_stmt.where(text_filter)
         total = await self.session.scalar(count_stmt) or 0
-        stmt = stmt.order_by(Supplier.supplier_name).offset((page - 1) * page_size).limit(page_size)
+        stmt = apply_sort(stmt, SUPPLIER_SORTS, sort_by, sort_dir, Supplier.supplier_name)
+        stmt = stmt.offset((page - 1) * page_size).limit(page_size)
         result = await self.session.execute(stmt)
         return list(result.scalars().all()), total
 
@@ -79,7 +109,8 @@ class MasterService:
         return vendor
 
     async def search_vendors(self, text: str = "", process_type: str | None = None,
-                             page: int = 1, page_size: int = 50) -> tuple[list[Vendor], int]:
+                             page: int = 1, page_size: int = 50,
+                             sort_by: str | None = None, sort_dir: str | None = None) -> tuple[list[Vendor], int]:
         stmt = select(Vendor).where(Vendor.is_active.is_(True))
         count_stmt = select(func.count()).select_from(Vendor).where(Vendor.is_active.is_(True))
         if process_type:
@@ -95,7 +126,8 @@ class MasterService:
             stmt = stmt.where(text_filter)
             count_stmt = count_stmt.where(text_filter)
         total = await self.session.scalar(count_stmt) or 0
-        stmt = stmt.order_by(Vendor.vendor_name).offset((page - 1) * page_size).limit(page_size)
+        stmt = apply_sort(stmt, VENDOR_SORTS, sort_by, sort_dir, Vendor.vendor_name)
+        stmt = stmt.offset((page - 1) * page_size).limit(page_size)
         result = await self.session.execute(stmt)
         return list(result.scalars().all()), total
 
@@ -124,7 +156,8 @@ class MasterService:
         return saree
 
     async def search_sarees(self, text: str = "", item_type: str | None = None,
-                            page: int = 1, page_size: int = 50) -> tuple[list[Saree], int]:
+                            page: int = 1, page_size: int = 50,
+                            sort_by: str | None = None, sort_dir: str | None = None) -> tuple[list[Saree], int]:
         stmt = select(Saree)
         count_stmt = select(func.count()).select_from(Saree)
         if item_type:
@@ -140,15 +173,17 @@ class MasterService:
             stmt = stmt.where(text_filter)
             count_stmt = count_stmt.where(text_filter)
         total = await self.session.scalar(count_stmt) or 0
-        stmt = stmt.order_by(Saree.saree_code).offset((page - 1) * page_size).limit(page_size)
+        stmt = apply_sort(stmt, SAREE_SORTS, sort_by, sort_dir, Saree.saree_code)
+        stmt = stmt.offset((page - 1) * page_size).limit(page_size)
         result = await self.session.execute(stmt)
         return list(result.scalars().all()), total
 
     # --- Process Types ---
-    async def list_process_types(self) -> list[VendorProcessType]:
-        result = await self.session.execute(
-            select(VendorProcessType).where(VendorProcessType.is_active.is_(True)).order_by(VendorProcessType.process_type)
-        )
+    async def list_process_types(self, sort_by: str | None = None,
+                                 sort_dir: str | None = None) -> list[VendorProcessType]:
+        stmt = select(VendorProcessType).where(VendorProcessType.is_active.is_(True))
+        stmt = apply_sort(stmt, PROCESS_TYPE_SORTS, sort_by, sort_dir, VendorProcessType.process_type)
+        result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
     async def create_process_type(self, process_type: str) -> VendorProcessType:

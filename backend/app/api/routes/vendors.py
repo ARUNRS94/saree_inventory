@@ -17,9 +17,10 @@ router = APIRouter(prefix="/vendors", tags=["Vendors"])
 async def list_vendors(
     search: str = "", process_type: str | None = None,
     page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=200),
+    sort_by: str | None = None, sort_dir: str = Query("asc", pattern="^(asc|desc)$"),
     db: AsyncSession = Depends(get_db), _user=Depends(get_current_user),
 ):
-    items, total = await MasterService(db).search_vendors(search, process_type, page, page_size)
+    items, total = await MasterService(db).search_vendors(search, process_type, page, page_size, sort_by, sort_dir)
     return VendorListResponse(
         items=[VendorResponse.model_validate(v) for v in items],
         total=total, page=page, page_size=page_size,
@@ -50,8 +51,12 @@ async def update_vendor(vendor_id: int, body: VendorUpdate, db: AsyncSession = D
 
 # --- Process Types ---
 @router.get("/process-types", response_model=list[VendorProcessTypeResponse])
-async def list_process_types(db: AsyncSession = Depends(get_db), _user=Depends(get_current_user)):
-    return [VendorProcessTypeResponse.model_validate(pt) for pt in await MasterService(db).list_process_types()]
+async def list_process_types(
+    sort_by: str | None = None, sort_dir: str = Query("asc", pattern="^(asc|desc)$"),
+    db: AsyncSession = Depends(get_db), _user=Depends(get_current_user),
+):
+    process_types = await MasterService(db).list_process_types(sort_by, sort_dir)
+    return [VendorProcessTypeResponse.model_validate(pt) for pt in process_types]
 
 
 @router.post("/process-types", response_model=VendorProcessTypeResponse, status_code=201)

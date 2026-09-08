@@ -16,7 +16,7 @@ class StockLedger(Base):
     transaction_date: Mapped[date] = mapped_column(Date, nullable=False)
     transaction_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
     reference_no: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    saree_id: Mapped[int] = mapped_column(ForeignKey("sarees.saree_id"), nullable=False)
+    saree_id: Mapped[int] = mapped_column(ForeignKey("sarees.saree_id"), nullable=False, index=True)
     qty_in: Mapped[int] = mapped_column(Integer, default=0)
     qty_out: Mapped[int] = mapped_column(Integer, default=0)
     rate: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=0)

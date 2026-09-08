@@ -3,14 +3,19 @@ import api from '@/services/api';
 import type { Saree, PaginatedResponse } from '@/types';
 import { PageHeader } from '@/components/PageHeader';
 import { FilterBar } from '@/components/FilterBar';
-import { DataTable, Pagination } from '@/components/DataTable';
+import { DataTable, Pagination, type SortState } from '@/components/DataTable';
 import { LoadingState, EmptyState } from '@/components/LoadingState';
+import { ImportDialog } from '@/components/ImportDialog';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function SareesPage() {
+  const { can } = useAuth();
+  const [showImport, setShowImport] = useState(false);
   const [data, setData] = useState<PaginatedResponse<Saree>>({ items: [], total: 0, page: 1, page_size: 50 });
   const [search, setSearch] = useState('');
   const [itemType, setItemType] = useState('');
   const [page, setPage] = useState(1);
+  const [sort, setSort] = useState<SortState>({ sort_by: 'saree_code', sort_dir: 'asc' });
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Saree | null>(null);
@@ -21,10 +26,10 @@ export default function SareesPage() {
 
   const load = useCallback(() => {
     setLoading(true);
-    api.get('/sarees', { params: { search, item_type: itemType || undefined, page, page_size: 50 } })
+    api.get('/sarees', { params: { search, item_type: itemType || undefined, page, page_size: 50, ...sort } })
       .then((r) => setData(r.data))
       .finally(() => setLoading(false));
-  }, [search, itemType, page]);
+  }, [search, itemType, page, sort]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -52,7 +57,23 @@ export default function SareesPage() {
 
   return (
     <div>
-      <PageHeader title="Sarees / Items" actions={<button className="btn-primary text-sm" onClick={openNew}>+ Add Item</button>} />
+      <PageHeader title="Sarees / Items" actions={
+        <>
+          {can('imports') && (
+            <button className="btn-secondary text-sm" onClick={() => setShowImport(true)}>Import CSV</button>
+          )}
+          <button className="btn-primary text-sm" onClick={openNew}>+ Add Item</button>
+        </>
+      } />
+      {showImport && (
+        <ImportDialog
+          entity="sarees"
+          title="Items"
+          columns={['saree_code*', 'saree_name*', 'fabric', 'category', 'design_name', 'color', 'unit']}
+          onClose={() => setShowImport(false)}
+          onImported={load}
+        />
+      )}
       {success && <div className="bg-green-50 text-green-700 text-sm px-4 py-2 rounded-lg mb-4">{success}</div>}
 
       {showForm && (
@@ -95,13 +116,15 @@ export default function SareesPage() {
               keyField="saree_id"
               data={data.items}
               onRowClick={openEdit}
+              sort={sort}
+              onSortChange={(s) => { setSort(s); setPage(1); }}
               columns={[
-                { header: 'Code', accessor: 'saree_code' },
-                { header: 'Name', accessor: 'saree_name' },
-                { header: 'Type', accessor: 'fabric' },
-                { header: 'Category', accessor: 'category', hideOnMobile: true },
-                { header: 'Color', accessor: 'color', hideOnMobile: true },
-                { header: 'Design', accessor: 'design_name', hideOnMobile: true },
+                { header: 'Code', accessor: 'saree_code', sortKey: 'saree_code' },
+                { header: 'Name', accessor: 'saree_name', sortKey: 'saree_name' },
+                { header: 'Type', accessor: 'fabric', sortKey: 'fabric' },
+                { header: 'Category', accessor: 'category', hideOnMobile: true, sortKey: 'category' },
+                { header: 'Color', accessor: 'color', hideOnMobile: true, sortKey: 'color' },
+                { header: 'Design', accessor: 'design_name', hideOnMobile: true, sortKey: 'design_name' },
               ]}
             />
             <Pagination page={page} total={data.total} pageSize={data.page_size} onChange={setPage} />

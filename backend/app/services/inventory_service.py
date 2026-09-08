@@ -92,12 +92,74 @@ class InventoryService:
             for sid, code, name, fabric, stock in result
         ]
 
+    async def _stock_map(self) -> dict[int, int]:
+        stmt = (
+            select(StockLedger.saree_id, func.coalesce(func.sum(StockLedger.qty_in - StockLedger.qty_out), 0))
+            .group_by(StockLedger.saree_id)
+        )
+        result = await self.session.execute(stmt)
+        return {saree_id: int(qty or 0) for saree_id, qty in result}
+
+    async def _latest_rate_map(self) -> dict[int, Decimal]:
+        """Latest rate per item, mirroring latest_purchase_rate's precedence in three set-based queries."""
+        ledger_sub = (
+            select(
+                StockLedger.saree_id.label("saree_id"),
+                StockLedger.rate.label("rate"),
+                func.row_number().over(
+                    partition_by=StockLedger.saree_id,
+                    order_by=(StockLedger.transaction_date.desc(), StockLedger.ledger_id.desc()),
+                ).label("rn"),
+            )
+            .where(StockLedger.transaction_type == "PURCHASE")
+            .subquery()
+        )
+        grn_sub = (
+            select(
+                GRNItem.saree_id.label("saree_id"),
+                GRNItem.rate.label("rate"),
+                func.row_number().over(
+                    partition_by=GRNItem.saree_id,
+                    order_by=(GRN.grn_date.desc(), GRNItem.grn_item_id.desc()),
+                ).label("rn"),
+            )
+            .join(GRN, GRN.grn_id == GRNItem.grn_id)
+            .subquery()
+        )
+        po_sub = (
+            select(
+                PurchaseOrderItem.saree_id.label("saree_id"),
+                PurchaseOrderItem.rate.label("rate"),
+                func.row_number().over(
+                    partition_by=PurchaseOrderItem.saree_id,
+                    order_by=(
+                        GRN.grn_date.desc(), GRNItem.grn_item_id.desc(), PurchaseOrderItem.po_item_id.desc(),
+                    ),
+                ).label("rn"),
+            )
+            .join(GRN, GRN.po_id == PurchaseOrderItem.po_id)
+            .join(GRNItem, (GRNItem.grn_id == GRN.grn_id) & (GRNItem.saree_id == PurchaseOrderItem.saree_id))
+            .subquery()
+        )
+
+        rates: dict[int, Decimal] = {}
+        # Weakest source first so stronger ones overwrite it.
+        for sub in (ledger_sub, grn_sub, po_sub):
+            result = await self.session.execute(select(sub.c.saree_id, sub.c.rate).where(sub.c.rn == 1))
+            for saree_id, rate in result:
+                if rate is not None:
+                    rates[saree_id] = Decimal(rate)
+        return rates
+
     async def inventory_valuation(self) -> list[dict]:
-        rows = []
+        await self.session.flush()
+        stock_by_id = await self._stock_map()
+        rate_by_id = await self._latest_rate_map()
         sarees = (await self.session.execute(select(Saree).order_by(Saree.saree_code))).scalars().all()
+        rows = []
         for saree in sarees:
-            stock = await self.current_stock(saree.saree_id)
-            rate = await self.latest_purchase_rate(saree.saree_id)
+            stock = stock_by_id.get(saree.saree_id, 0)
+            rate = rate_by_id.get(saree.saree_id, Decimal("0"))
             rows.append({
                 "saree_id": saree.saree_id,
                 "saree_code": saree.saree_code,
@@ -109,5 +171,10 @@ class InventoryService:
         return rows
 
     async def total_inventory_value(self) -> Decimal:
-        rows = await self.inventory_valuation()
-        return sum((r["value"] for r in rows), Decimal("0"))
+        await self.session.flush()
+        stock_by_id = await self._stock_map()
+        rate_by_id = await self._latest_rate_map()
+        return sum(
+            (Decimal(qty) * rate_by_id.get(saree_id, Decimal("0")) for saree_id, qty in stock_by_id.items()),
+            Decimal("0"),
+        )

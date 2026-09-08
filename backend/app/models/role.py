@@ -12,6 +12,7 @@ PERMISSION_CATALOGUE: list[tuple[str, str, str]] = [
     ("users", "User Management", "Create, edit and deactivate users"),
     ("roles", "Access Management", "Create roles and assign permissions"),
     ("masters", "Masters", "Manage sarees, suppliers and vendors"),
+    ("imports", "Bulk Import", "Import master data from CSV files"),
     ("purchase", "Purchase", "Manage purchase orders"),
     ("grn", "GRN", "Manage goods receipt notes"),
     ("jobwork", "Job Work", "Manage job work issues and receipts"),

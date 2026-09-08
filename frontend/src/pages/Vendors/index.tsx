@@ -3,15 +3,20 @@ import api from '@/services/api';
 import type { Vendor, VendorProcessType, PaginatedResponse } from '@/types';
 import { PageHeader } from '@/components/PageHeader';
 import { FilterBar } from '@/components/FilterBar';
-import { DataTable, Pagination } from '@/components/DataTable';
+import { DataTable, Pagination, type SortState } from '@/components/DataTable';
+import { ImportDialog } from '@/components/ImportDialog';
+import { useAuth } from '@/contexts/AuthContext';
 import { LoadingState, EmptyState } from '@/components/LoadingState';
 
 export default function VendorsPage() {
+  const { can } = useAuth();
+  const [importEntity, setImportEntity] = useState<'vendors' | 'process-types' | null>(null);
   const [data, setData] = useState<PaginatedResponse<Vendor>>({ items: [], total: 0, page: 1, page_size: 50 });
   const [processTypes, setProcessTypes] = useState<VendorProcessType[]>([]);
   const [search, setSearch] = useState('');
   const [filterPT, setFilterPT] = useState('');
   const [page, setPage] = useState(1);
+  const [sort, setSort] = useState<SortState>({ sort_by: 'vendor_name', sort_dir: 'asc' });
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [showPTForm, setShowPTForm] = useState(false);
@@ -27,10 +32,10 @@ export default function VendorsPage() {
   const load = useCallback(() => {
     setLoading(true);
     Promise.all([
-      api.get('/vendors', { params: { search, process_type: filterPT || undefined, page, page_size: 50 } }).then((r) => setData(r.data)),
+      api.get('/vendors', { params: { search, process_type: filterPT || undefined, page, page_size: 50, ...sort } }).then((r) => setData(r.data)),
       loadPTs(),
     ]).finally(() => setLoading(false));
-  }, [search, filterPT, page]);
+  }, [search, filterPT, page, sort]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -58,11 +63,28 @@ export default function VendorsPage() {
   return (
     <div>
       <PageHeader title="Vendors" actions={
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
+          {can('imports') && (
+            <>
+              <button className="btn-secondary text-sm" onClick={() => setImportEntity('process-types')}>Import Process Types</button>
+              <button className="btn-secondary text-sm" onClick={() => setImportEntity('vendors')}>Import Vendors</button>
+            </>
+          )}
           <button className="btn-secondary text-sm" onClick={() => { setShowPTForm(!showPTForm); setError(''); }}>+ Process Type</button>
           <button className="btn-primary text-sm" onClick={openNew}>+ Add Vendor</button>
         </div>
       } />
+      {importEntity && (
+        <ImportDialog
+          entity={importEntity}
+          title={importEntity === 'vendors' ? 'Vendors' : 'Process Types'}
+          columns={importEntity === 'vendors'
+            ? ['vendor_name*', 'process_type*', 'contact_person', 'phone', 'gst_no', 'address']
+            : ['process_type*']}
+          onClose={() => setImportEntity(null)}
+          onImported={load}
+        />
+      )}
       {success && <div className="bg-green-50 text-green-700 text-sm px-4 py-2 rounded-lg mb-4">{success}</div>}
       {error && <div className="bg-red-50 text-red-700 text-sm px-4 py-2 rounded-lg mb-4">{error}</div>}
 
@@ -114,10 +136,11 @@ export default function VendorsPage() {
         </div>
         {loading ? <LoadingState /> : data.items.length === 0 ? <EmptyState /> : (
           <>
-            <DataTable keyField="vendor_id" data={data.items} onRowClick={openEdit} columns={[
-              { header: 'Name', accessor: 'vendor_name' },
-              { header: 'Process Type', accessor: 'process_type' },
-              { header: 'Phone', accessor: 'phone', hideOnMobile: true },
+            <DataTable keyField="vendor_id" data={data.items} onRowClick={openEdit}
+              sort={sort} onSortChange={(s) => { setSort(s); setPage(1); }} columns={[
+              { header: 'Name', accessor: 'vendor_name', sortKey: 'vendor_name' },
+              { header: 'Process Type', accessor: 'process_type', sortKey: 'process_type' },
+              { header: 'Phone', accessor: 'phone', hideOnMobile: true, sortKey: 'phone' },
             ]} />
             <Pagination page={page} total={data.total} pageSize={data.page_size} onChange={setPage} />
           </>
