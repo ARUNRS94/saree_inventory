@@ -6,6 +6,7 @@ import { FilterBar } from '@/components/FilterBar';
 import { DataTable, Pagination, type SortState } from '@/components/DataTable';
 import { ImportDialog } from '@/components/ImportDialog';
 import { useAuth } from '@/contexts/AuthContext';
+import { downloadFile } from '@/utils/download';
 import { LoadingState, EmptyState } from '@/components/LoadingState';
 
 export default function VendorsPage() {
@@ -64,6 +65,7 @@ export default function VendorsPage() {
     <div>
       <PageHeader title="Vendors" actions={
         <div className="flex gap-2 flex-wrap">
+          <button className="btn-secondary text-sm" onClick={() => downloadFile('/exports/vendors', 'vendors_export.csv', { search, filter_value: filterPT || undefined, ...sort })}>Export CSV</button>
           {can('imports') && (
             <>
               <button className="btn-secondary text-sm" onClick={() => setImportEntity('process-types')}>Import Process Types</button>

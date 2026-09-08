@@ -4,11 +4,12 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_db, require_permission
+from app.core.dependencies import get_current_user, get_db, require_permission
 from app.models.user import User
-from app.services.import_service import ENTITY_SPECS, ImportService, build_template
+from app.services.import_service import ENTITY_SPECS, ImportService, build_template, export_csv
 
 router = APIRouter(prefix="/imports", tags=["Imports"])
+export_router = APIRouter(prefix="/exports", tags=["Exports"])
 
 require_imports = require_permission("imports")
 
@@ -61,3 +62,23 @@ async def import_csv(
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     return result.as_dict()
+
+
+# Export is available to anyone who can already view the data on screen.
+@export_router.get("/{entity}")
+async def export_entity(
+    entity: str,
+    search: str = "",
+    filter_value: str | None = None,
+    sort_by: str | None = None,
+    sort_dir: str = "asc",
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    _spec_or_404(entity)
+    content = await export_csv(db, entity, search, filter_value, sort_by, sort_dir)
+    return Response(
+        content=content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={entity}_export.csv"},
+    )

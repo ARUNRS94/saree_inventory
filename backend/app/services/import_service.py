@@ -14,6 +14,7 @@ from app.models.vendor_process_type import VendorProcessType
 from app.services.master_service import CONTACT_TYPES, ITEM_TYPES, MasterService
 
 MAX_ROWS = 5000
+EXPORT_LIMIT = 100_000
 
 
 @dataclass
@@ -68,6 +69,35 @@ def build_template(entity: str) -> str:
     writer = csv.writer(buffer)
     writer.writerow(spec.columns)
     writer.writerow(spec.sample)
+    return buffer.getvalue()
+
+
+async def export_csv(
+    session: AsyncSession,
+    entity: str,
+    search: str = "",
+    filter_value: str | None = None,
+    sort_by: str | None = None,
+    sort_dir: str | None = None,
+) -> str:
+    """Export every row matching the caller's current filters, ignoring pagination."""
+    spec = ENTITY_SPECS[entity]
+    master = MasterService(session)
+
+    if entity == "sarees":
+        rows, _ = await master.search_sarees(search, filter_value, 1, EXPORT_LIMIT, sort_by, sort_dir)
+    elif entity == "suppliers":
+        rows, _ = await master.search_contacts(search, filter_value, 1, EXPORT_LIMIT, sort_by, sort_dir)
+    elif entity == "vendors":
+        rows, _ = await master.search_vendors(search, filter_value, 1, EXPORT_LIMIT, sort_by, sort_dir)
+    else:
+        rows = await master.list_process_types(sort_by, sort_dir)
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(spec.columns)
+    for row in rows:
+        writer.writerow([getattr(row, column, "") if getattr(row, column, None) is not None else "" for column in spec.columns])
     return buffer.getvalue()
 
 

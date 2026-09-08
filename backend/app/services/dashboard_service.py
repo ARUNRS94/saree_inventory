@@ -41,19 +41,17 @@ class DashboardService:
         total_stock = await self.inventory.current_stock()
         stock_value = await self.inventory.total_inventory_value()
 
-        open_po_value = Decimal(await self.session.scalar(
-            select(func.coalesce(func.sum(PurchaseOrderItem.amount), 0))
+        # One round trip for both open-PO aggregates.
+        open_po_value, pending_po_qty = (await self.session.execute(
+            select(
+                func.coalesce(func.sum(PurchaseOrderItem.amount), 0),
+                func.coalesce(func.sum(PurchaseOrderItem.ordered_qty), 0),
+            )
             .join(PurchaseOrder)
             .where(PurchaseOrder.status.in_(["OPEN", "PARTIAL"]))
-        ) or 0)
+        )).one()
 
-        pending_po_qty = int(await self.session.scalar(
-            select(func.coalesce(func.sum(PurchaseOrderItem.ordered_qty), 0))
-            .join(PurchaseOrder)
-            .where(PurchaseOrder.status.in_(["OPEN", "PARTIAL"]))
-        ) or 0)
-
-        # Vendor WIP: sum of issued qty from open job work issues minus received
+        # Vendor WIP: issued qty on open job work, minus what has come back.
         issued_qty = int(await self.session.scalar(
             select(func.coalesce(func.sum(JobWorkIssueItem.issued_qty), 0))
             .join(JobWorkIssue)
@@ -67,19 +65,20 @@ class DashboardService:
         ) or 0)
         vendor_wip = max(issued_qty - received_qty, 0)
 
-        active_sarees = int(await self.session.scalar(select(func.count()).select_from(Saree)) or 0)
-        active_vendors = int(await self.session.scalar(
-            select(func.count()).select_from(Vendor).where(Vendor.is_active.is_(True))
-        ) or 0)
-        active_suppliers = int(await self.session.scalar(
-            select(func.count()).select_from(Supplier).where(Supplier.is_active.is_(True))
-        ) or 0)
+        # Three master-data counts in a single round trip.
+        active_sarees, active_vendors, active_suppliers = (await self.session.execute(
+            select(
+                select(func.count()).select_from(Saree).scalar_subquery(),
+                select(func.count()).select_from(Vendor).where(Vendor.is_active.is_(True)).scalar_subquery(),
+                select(func.count()).select_from(Supplier).where(Supplier.is_active.is_(True)).scalar_subquery(),
+            )
+        )).one()
 
         return DashboardCardData(
             total_stock_qty=total_stock, stock_value=stock_value,
-            open_po_value=open_po_value, pending_po_qty=pending_po_qty,
-            vendor_wip_qty=vendor_wip, active_sarees=active_sarees,
-            active_vendors=active_vendors, active_suppliers=active_suppliers,
+            open_po_value=Decimal(open_po_value or 0), pending_po_qty=int(pending_po_qty or 0),
+            vendor_wip_qty=vendor_wip, active_sarees=int(active_sarees or 0),
+            active_vendors=int(active_vendors or 0), active_suppliers=int(active_suppliers or 0),
         )
 
     async def _purchase_trend(self) -> list[PurchaseTrendItem]:

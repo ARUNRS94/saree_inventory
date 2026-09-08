@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.core.database import engine
@@ -16,12 +17,14 @@ async def _bootstrap() -> None:
     from sqlalchemy import func, select
 
     from app.core.database import async_session_factory
-    from app.models.role import Role
+    from app.models.role import PERMISSION_CATALOGUE, Permission
     from app.services.auth_service import ensure_default_admin
     from app.services.rbac_service import seed_rbac
 
     async with async_session_factory() as session:
-        if not await session.scalar(select(func.count()).select_from(Role)):
+        # One cheap check: a short catalogue means new permissions need seeding and granting.
+        known = await session.scalar(select(func.count()).select_from(Permission)) or 0
+        if known < len(PERMISSION_CATALOGUE):
             await seed_rbac(session)
         await ensure_default_admin(session)
         await session.commit()
@@ -31,6 +34,10 @@ async def _bootstrap() -> None:
 async def lifespan(app: FastAPI):
     from app.core.database import Base
     import app.models  # noqa: F401  (register all mappers)
+
+    problems = settings.validate_for_production()
+    if problems:
+        raise RuntimeError("Unsafe production configuration:\n  - " + "\n  - ".join(problems))
 
     # Alembic owns the schema everywhere except local SQLite development.
     if settings.is_sqlite:
@@ -60,10 +67,24 @@ from app.api.routes import settings as settings_routes
 
 for router in [auth.router, access.router, dashboard.router, sarees.router, suppliers.router,
                vendors.router, purchase_orders.router, grns.router,
-               job_work.router, inventory.router, reports.router, imports.router, settings_routes.router]:
+               job_work.router, inventory.router, reports.router,
+               imports.router, imports.export_router, settings_routes.router]:
     app.include_router(router, prefix="/api/v1")
 
 
 @app.get("/api/health")
 async def health():
+    return {"status": "ok", "app": settings.APP_NAME, "environment": settings.ENVIRONMENT}
+
+
+@app.get("/api/health/db")
+async def health_db():
+    """Readiness probe: confirms the database is reachable."""
+    from sqlalchemy import text
+
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+    except Exception as exc:
+        return JSONResponse(status_code=503, content={"status": "unavailable", "detail": type(exc).__name__})
     return {"status": "ok"}

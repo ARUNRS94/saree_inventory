@@ -7,6 +7,9 @@ from pydantic_settings import BaseSettings
 # asyncpg rejects these libpq-only connection parameters.
 _LIBPQ_ONLY_PARAMS = {"channel_binding", "sslmode", "connect_timeout", "target_session_attrs"}
 
+_INSECURE_SECRETS = {"change-me", "change-me-to-a-random-secret-key", "change-me-to-a-jwt-secret-key",
+                     "dev-only-change-me", "secret", "changeme"}
+
 
 def _rewrite_pg_url(url: str, driver: str) -> str:
     """Point a Postgres URL at the given driver, translating params the driver can't take."""
@@ -94,6 +97,25 @@ class Settings(BaseSettings):
             return True
         host = urlsplit(self.DATABASE_URL).hostname or ""
         return "-pooler." in host or "pgbouncer" in self.DATABASE_URL
+
+    @property
+    def is_production(self) -> bool:
+        return self.ENVIRONMENT.strip().lower() in {"production", "prod"}
+
+    def validate_for_production(self) -> list[str]:
+        """Configuration that is safe locally but dangerous once deployed."""
+        problems = []
+        if not self.is_production:
+            return problems
+        for name in ("SECRET_KEY", "JWT_SECRET_KEY"):
+            value = getattr(self, name)
+            if not value or value in _INSECURE_SECRETS or len(value) < 32:
+                problems.append(f"{name} must be set to a unique random value of at least 32 characters.")
+        if self.is_sqlite:
+            problems.append("DATABASE_URL points at SQLite; production needs PostgreSQL.")
+        if not self.cors_origins_list:
+            problems.append("CORS_ORIGINS must list the site origin(s).")
+        return problems
 
 
 settings = Settings()

@@ -7,6 +7,7 @@ import { DataTable, Pagination, type SortState } from '@/components/DataTable';
 import { LoadingState, EmptyState } from '@/components/LoadingState';
 import { ImportDialog } from '@/components/ImportDialog';
 import { useAuth } from '@/contexts/AuthContext';
+import { downloadFile } from '@/utils/download';
 
 export default function SareesPage() {
   const { can } = useAuth();
@@ -59,6 +60,7 @@ export default function SareesPage() {
     <div>
       <PageHeader title="Sarees / Items" actions={
         <>
+          <button className="btn-secondary text-sm" onClick={() => downloadFile('/exports/sarees', 'sarees_export.csv', { search, filter_value: itemType || undefined, ...sort })}>Export CSV</button>
           {can('imports') && (
             <button className="btn-secondary text-sm" onClick={() => setShowImport(true)}>Import CSV</button>
           )}

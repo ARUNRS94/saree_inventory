@@ -6,6 +6,7 @@ import { FilterBar } from '@/components/FilterBar';
 import { DataTable, Pagination, type SortState } from '@/components/DataTable';
 import { ImportDialog } from '@/components/ImportDialog';
 import { useAuth } from '@/contexts/AuthContext';
+import { downloadFile } from '@/utils/download';
 import { LoadingState, EmptyState } from '@/components/LoadingState';
 
 export default function SuppliersPage() {
@@ -61,6 +62,7 @@ export default function SuppliersPage() {
     <div>
       <PageHeader title="Suppliers / Contacts" actions={
         <>
+          <button className="btn-secondary text-sm" onClick={() => downloadFile('/exports/suppliers', 'suppliers_export.csv', { search, filter_value: filterType || undefined, ...sort })}>Export CSV</button>
           {can('imports') && (
             <button className="btn-secondary text-sm" onClick={() => setShowImport(true)}>Import CSV</button>
           )}

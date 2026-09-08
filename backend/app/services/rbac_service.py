@@ -26,7 +26,16 @@ async def seed_rbac(session: AsyncSession) -> None:
                 is_system=True,
                 permissions=[permissions[c] for c in sorted(codes)],
             ))
+
     await session.flush()
+
+    # Admin is defined as full access, so newly added permissions must reach it.
+    admin = await session.scalar(select(Role).where(Role.role_name == "admin"))
+    if admin is not None:
+        missing = [p for code, p in permissions.items() if code not in admin.permission_codes]
+        if missing:
+            admin.permissions = list(admin.permissions) + missing
+            await session.flush()
 
 
 class RBACService:
