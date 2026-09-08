@@ -93,7 +93,7 @@ class PurchaseService:
 
     async def receive_grn(self, po_id: int, lines: list[tuple[int, int, int, Decimal]],
                           grn_date: date | None = None, remarks: str | None = None) -> GRN:
-        po = await self.session.get(PurchaseOrder, po_id, options=[selectinload(PurchaseOrder.contact), selectinload(PurchaseOrder.items)])
+        po = await self.session.get(PurchaseOrder, po_id, populate_existing=True, options=[selectinload(PurchaseOrder.contact), selectinload(PurchaseOrder.items)])
         if po is None:
             raise ValueError("Purchase order not found.")
         if not lines:
@@ -175,7 +175,7 @@ class PurchaseService:
             raise ValueError("Insufficient WIP stock to complete the Sub vendor GRN.")
 
     async def cancel_po(self, po_id: int, cancel_date: date | None = None, remarks: str | None = None) -> PurchaseOrder:
-        po = await self.session.get(PurchaseOrder, po_id, options=[selectinload(PurchaseOrder.contact), selectinload(PurchaseOrder.items)])
+        po = await self.session.get(PurchaseOrder, po_id, populate_existing=True, options=[selectinload(PurchaseOrder.contact), selectinload(PurchaseOrder.items)])
         if po is None:
             raise ValueError("Purchase order not found.")
         if po.status == "CANCELLED":

@@ -30,7 +30,7 @@ def _grn_to_response(grn) -> GRNResponse:
 async def list_grns(
     po_id: int | None = None, search: str = "",
     date_from: date | None = None, date_to: date | None = None,
-    page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=200),
+    page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db), _user=Depends(get_current_user),
 ):
     grns, total = await PurchaseService(db).list_grns(po_id, search, date_from, date_to, page, page_size)
@@ -47,7 +47,7 @@ async def create_grn(body: GRNCreate, db: AsyncSession = Depends(get_db), _user=
         grn = await PurchaseService(db).receive_grn(body.po_id, lines, body.grn_date, body.remarks)
         from sqlalchemy.orm import selectinload
         from app.models.grn import GRN, GRNItem
-        grn = await db.get(GRN, grn.grn_id, options=[
+        grn = await db.get(GRN, grn.grn_id, populate_existing=True, options=[
             selectinload(GRN.purchase_order),
             selectinload(GRN.items).selectinload(GRNItem.item),
         ])

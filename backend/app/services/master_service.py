@@ -24,6 +24,10 @@ CONTACT_TYPE_ALIASES = {
 
 ITEM_TYPES = ["RM", "Sub process", "FG"]
 
+RAW_MATERIAL = "RM"
+SUB_PROCESS = "Sub process"
+FINISHED_GOODS = "FG"
+
 # Codes are what we store; labels are what users see and what reports print.
 ITEM_TYPE_LABELS = {"RM": "Raw Material", "Sub process": "Sub Process", "FG": "Finished Goods"}
 ITEM_TYPE_ALIASES = {label.lower(): code for code, label in ITEM_TYPE_LABELS.items()}

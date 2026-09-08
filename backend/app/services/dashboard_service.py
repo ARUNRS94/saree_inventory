@@ -7,7 +7,6 @@ from sqlalchemy import extract, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.grn import GRN, GRNItem
-from app.models.job_work import JobWorkIssue, JobWorkIssueItem, JobWorkReceipt, JobWorkReceiptItem
 from app.models.purchase_order import PurchaseOrder, PurchaseOrderItem
 from app.models.item import Item
 from app.models.stock_ledger import StockLedger
@@ -18,7 +17,7 @@ from app.schemas.dashboard import (
     PurchaseTrendItem, StockMovementItem,
 )
 from app.services.inventory_service import InventoryService
-from app.services.master_service import item_type_label
+from app.services.master_service import SUB_PROCESS, item_type_label
 
 
 class DashboardService:
@@ -52,19 +51,13 @@ class DashboardService:
             .where(PurchaseOrder.status.in_(["OPEN", "PARTIAL"]))
         )).one()
 
-        # Vendor WIP: issued qty on open job work, minus what has come back.
-        issued_qty = int(await self.session.scalar(
-            select(func.coalesce(func.sum(JobWorkIssueItem.issued_qty), 0))
-            .join(JobWorkIssue)
-            .where(JobWorkIssue.status.in_(["OPEN", "PARTIAL"]))
+        # Quantity sitting with Sub Vendors: the ledger balance of Sub Process items,
+        # posted as WIP_STOCK_IN on the PO and cleared by WIP_STOCK_OUT/CANCEL.
+        vendor_wip = int(await self.session.scalar(
+            select(func.coalesce(func.sum(StockLedger.qty_in - StockLedger.qty_out), 0))
+            .join(Item, Item.item_id == StockLedger.item_id)
+            .where(Item.item_type == SUB_PROCESS)
         ) or 0)
-        received_qty = int(await self.session.scalar(
-            select(func.coalesce(func.sum(JobWorkReceiptItem.received_qty + JobWorkReceiptItem.rejected_qty), 0))
-            .join(JobWorkReceipt)
-            .join(JobWorkIssue, JobWorkIssue.issue_id == JobWorkReceipt.issue_id)
-            .where(JobWorkIssue.status.in_(["OPEN", "PARTIAL"]))
-        ) or 0)
-        vendor_wip = max(issued_qty - received_qty, 0)
 
         # Three master-data counts in a single round trip.
         active_items, active_vendors, active_contacts = (await self.session.execute(

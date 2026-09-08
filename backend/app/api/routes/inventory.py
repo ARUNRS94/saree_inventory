@@ -38,7 +38,7 @@ async def get_valuation(db: AsyncSession = Depends(get_db), _user=Depends(get_cu
 async def get_ledger(
     search: str = "", transaction_type: str | None = None,
     date_from: date | None = None, date_to: date | None = None,
-    page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=200),
+    page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db), _user=Depends(get_current_user),
 ):
     base_filter = []

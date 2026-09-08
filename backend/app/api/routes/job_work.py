@@ -47,7 +47,7 @@ def _receipt_to_response(receipt) -> JobWorkReceiptResponse:
 async def list_issues(
     status: str | None = None, vendor_id: int | None = None,
     search: str = "", date_from: str | None = None, date_to: str | None = None,
-    page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=200),
+    page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db), _user=Depends(get_current_user),
 ):
     issues, total = await JobWorkService(db).list_issues(status, vendor_id, search, date_from, date_to, page, page_size)
@@ -64,7 +64,7 @@ async def create_issue(body: JobWorkIssueCreate, db: AsyncSession = Depends(get_
         issue = await JobWorkService(db).issue(body.vendor_id, lines, body.issue_date, body.remarks)
         from sqlalchemy.orm import selectinload
         from app.models.job_work import JobWorkIssue, JobWorkIssueItem
-        issue = await db.get(JobWorkIssue, issue.issue_id, options=[
+        issue = await db.get(JobWorkIssue, issue.issue_id, populate_existing=True, options=[
             selectinload(JobWorkIssue.vendor),
             selectinload(JobWorkIssue.items).selectinload(JobWorkIssueItem.item),
         ])
@@ -84,7 +84,7 @@ async def get_pending_qty(issue_id: int, item_id: int, db: AsyncSession = Depend
 async def list_receipts(
     issue_id: int | None = None, search: str = "",
     date_from: str | None = None, date_to: str | None = None,
-    page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=200),
+    page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db), _user=Depends(get_current_user),
 ):
     receipts, total = await JobWorkService(db).list_receipts(issue_id, search, date_from, date_to, page, page_size)
@@ -101,7 +101,7 @@ async def create_receipt(body: JobWorkReceiptCreate, db: AsyncSession = Depends(
         receipt = await JobWorkService(db).receive(body.issue_id, body.vendor_id, lines, body.receipt_date)
         from sqlalchemy.orm import selectinload
         from app.models.job_work import JobWorkReceipt, JobWorkReceiptItem
-        receipt = await db.get(JobWorkReceipt, receipt.receipt_id, options=[
+        receipt = await db.get(JobWorkReceipt, receipt.receipt_id, populate_existing=True, options=[
             selectinload(JobWorkReceipt.vendor),
             selectinload(JobWorkReceipt.issue),
             selectinload(JobWorkReceipt.items).selectinload(JobWorkReceiptItem.item),

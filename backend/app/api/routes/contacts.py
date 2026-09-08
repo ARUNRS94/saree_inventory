@@ -13,7 +13,7 @@ router = APIRouter(prefix="/contacts", tags=["Contacts"])
 @router.get("", response_model=ContactListResponse)
 async def list_suppliers(
     search: str = "", contact_type: str | None = None,
-    page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=200),
+    page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=500),
     sort_by: str | None = None, sort_dir: str = Query("asc", pattern="^(asc|desc)$"),
     db: AsyncSession = Depends(get_db), _user=Depends(get_current_user),
 ):

@@ -45,7 +45,7 @@ def _po_to_response(po) -> PurchaseOrderResponse:
 async def list_pos(
     status: str | None = None, contact_id: int | None = None,
     search: str = "", date_from: date | None = None, date_to: date | None = None,
-    page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=200),
+    page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db), _user=Depends(get_current_user),
 ):
     pos, total = await PurchaseService(db).list_pos(status, contact_id, search, date_from, date_to, page, page_size)
@@ -68,7 +68,7 @@ async def create_po(body: PurchaseOrderCreate, db: AsyncSession = Depends(get_db
         # Reload with relationships
         from sqlalchemy.orm import selectinload
         from app.models.purchase_order import PurchaseOrder, PurchaseOrderItem
-        po = await db.get(PurchaseOrder, po.po_id, options=[
+        po = await db.get(PurchaseOrder, po.po_id, populate_existing=True, options=[
             selectinload(PurchaseOrder.contact),
             selectinload(PurchaseOrder.items).selectinload(PurchaseOrderItem.item),
             selectinload(PurchaseOrder.items).selectinload(PurchaseOrderItem.stock_out_item),
@@ -84,7 +84,7 @@ async def update_po_status(po_id: int, body: PurchaseOrderStatusUpdate, db: Asyn
     try:
         from app.models.purchase_order import PurchaseOrder, PurchaseOrderItem
         from sqlalchemy.orm import selectinload
-        po = await db.get(PurchaseOrder, po_id, options=[
+        po = await db.get(PurchaseOrder, po_id, populate_existing=True, options=[
             selectinload(PurchaseOrder.contact),
             selectinload(PurchaseOrder.items).selectinload(PurchaseOrderItem.item),
             selectinload(PurchaseOrder.items).selectinload(PurchaseOrderItem.stock_out_item),
@@ -107,7 +107,7 @@ async def cancel_po(po_id: int, db: AsyncSession = Depends(get_db), _user=Depend
         po = await PurchaseService(db).cancel_po(po_id)
         from sqlalchemy.orm import selectinload
         from app.models.purchase_order import PurchaseOrder, PurchaseOrderItem
-        po = await db.get(PurchaseOrder, po.po_id, options=[
+        po = await db.get(PurchaseOrder, po.po_id, populate_existing=True, options=[
             selectinload(PurchaseOrder.contact),
             selectinload(PurchaseOrder.items).selectinload(PurchaseOrderItem.item),
             selectinload(PurchaseOrder.items).selectinload(PurchaseOrderItem.stock_out_item),

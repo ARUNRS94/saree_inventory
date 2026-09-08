@@ -43,7 +43,7 @@ class JobWorkService:
     async def receive(self, issue_id: int, vendor_id: int,
                       lines: list[tuple[int, int, int, Decimal]],
                       receipt_date: date | None = None) -> JobWorkReceipt:
-        issue = await self.session.get(JobWorkIssue, issue_id, options=[selectinload(JobWorkIssue.items)])
+        issue = await self.session.get(JobWorkIssue, issue_id, populate_existing=True, options=[selectinload(JobWorkIssue.items)])
         if issue is None:
             raise ValueError("Job work issue not found.")
         if not lines:
