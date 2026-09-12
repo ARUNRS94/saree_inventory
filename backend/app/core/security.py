@@ -8,13 +8,27 @@ from jose import JWTError, jwt
 
 from app.core.config import settings
 
-ph = PasswordHasher()
+ph = PasswordHasher(
+    time_cost=settings.ARGON2_TIME_COST,
+    memory_cost=settings.ARGON2_MEMORY_KIB,
+    parallelism=settings.ARGON2_PARALLELISM,
+)
 
 ALGORITHM = "HS256"
 
 
 def hash_password(password: str) -> str:
     return ph.hash(password)
+
+
+def needs_rehash(hashed: str | None) -> bool:
+    """True when a stored hash used older//heavier parameters than the current policy."""
+    if not hashed:
+        return False
+    try:
+        return ph.check_needs_rehash(hashed)
+    except Exception:
+        return False
 
 
 def verify_password(plain: str, hashed: str | None) -> bool:

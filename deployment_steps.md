@@ -2,6 +2,7 @@
 
 - [Deploying to Vercel (containers)](#deploying-inventory-management-to-vercel) — recommended
 - [Deploying to a Hostinger VPS](#deploying-inventory-management-to-a-hostinger-vps)
+- [Migrating an existing deployment](migration_steps.md) — Neon → another Postgres, Vercel → another VPS
 
 ---
 

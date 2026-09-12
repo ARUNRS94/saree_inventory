@@ -8,7 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.google_oauth import GoogleProfile, verify_google_id_token
-from app.core.security import create_access_token, create_refresh_token, decode_token, hash_password, verify_password
+from app.core.security import (
+    create_access_token, create_refresh_token, decode_token, hash_password, needs_rehash, verify_password,
+)
 from app.models.role import DEFAULT_SIGNUP_ROLE, Role
 from app.models.user import AUTH_PROVIDER_GOOGLE, AUTH_PROVIDER_LOCAL, User
 from app.models.user_identity import UserIdentity
@@ -81,6 +83,8 @@ class AuthService:
             raise ValueError("Invalid username or password.")
         if not user.is_active:
             raise ValueError("Account is inactive.")
+        if needs_rehash(user.password_hash):
+            user.password_hash = hash_password(password)
         user.last_login_at = datetime.now(timezone.utc).replace(tzinfo=None)
         await self.session.flush()
         access, refresh = self._issue_tokens(user)

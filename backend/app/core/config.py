@@ -4,8 +4,12 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic_settings import BaseSettings
 
-# asyncpg rejects these libpq-only connection parameters.
-_LIBPQ_ONLY_PARAMS = {"channel_binding", "sslmode", "connect_timeout", "target_session_attrs"}
+# asyncpg takes only a handful of query parameters; libpq options and pooler hints make it raise.
+_ASYNCPG_PARAMS = {"ssl"}
+
+# Query parameters no PostgreSQL driver accepts: Supabase appends `pgbouncer`/`supa`,
+# Prisma-style URLs add connection_limit/pool_timeout/schema.
+_NON_DRIVER_PARAMS = {"pgbouncer", "supa", "connection_limit", "pool_timeout", "schema"}
 
 _INSECURE_SECRETS = {"change-me", "change-me-to-a-random-secret-key", "change-me-to-a-jwt-secret-key",
                      "dev-only-change-me", "secret", "changeme"}
@@ -21,13 +25,15 @@ def _rewrite_pg_url(url: str, driver: str) -> str:
 
     params = parse_qsl(parts.query, keep_blank_values=True)
     if driver == "asyncpg":
-        rewritten = []
+        cleaned: dict[str, str] = {}
         for key, value in params:
-            if key not in _LIBPQ_ONLY_PARAMS:
-                rewritten.append((key, value))
-            elif key == "sslmode":
-                rewritten.append(("ssl", "disable" if value == "disable" else "require"))
-        params = rewritten
+            if key == "sslmode":
+                cleaned["ssl"] = "disable" if value == "disable" else "require"
+            elif key in _ASYNCPG_PARAMS:
+                cleaned[key] = value
+        params = list(cleaned.items())
+    else:
+        params = [(k, v) for k, v in params if k not in _NON_DRIVER_PARAMS]
 
     return urlunsplit((f"postgresql+{driver}", parts.netloc, parts.path, urlencode(params), parts.fragment))
 
@@ -49,6 +55,12 @@ class Settings(BaseSettings):
     DB_POOL_RECYCLE_SECONDS: int = 300
     # Required when connecting through a transaction-mode pooler (Neon "-pooler" host, Supabase pgbouncer).
     DB_DISABLE_PREPARED_STATEMENTS: bool = False
+
+    # Argon2id cost. Defaults follow the OWASP minimum (m=19MiB, t=2, p=1), which suits
+    # the single vCPU a serverless container gets; the library default of p=4 just contends.
+    ARGON2_TIME_COST: int = 2
+    ARGON2_MEMORY_KIB: int = 19456
+    ARGON2_PARALLELISM: int = 1
 
     # Google Sign-In (Google Identity Services ID token flow)
     GOOGLE_CLIENT_ID: str = ""
@@ -95,8 +107,10 @@ class Settings(BaseSettings):
         """Transaction-mode poolers break asyncpg's prepared statements."""
         if self.DB_DISABLE_PREPARED_STATEMENTS:
             return True
-        host = urlsplit(self.DATABASE_URL).hostname or ""
-        return "-pooler." in host or "pgbouncer" in self.DATABASE_URL
+        parts = urlsplit(self.DATABASE_URL)
+        host = parts.hostname or ""
+        # Neon's PgBouncer host, Supabase's transaction pooler (port 6543), or an explicit hint.
+        return "-pooler." in host or parts.port == 6543 or "pgbouncer" in self.DATABASE_URL
 
     @property
     def is_production(self) -> bool:

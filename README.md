@@ -102,7 +102,8 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"
 
 ## Deploying
 
-Both paths are documented step by step in [deployment_steps.md](deployment_steps.md).
+Both paths are documented step by step in [deployment_steps.md](deployment_steps.md). To move an
+existing deployment to a different database or host, see [migration_steps.md](migration_steps.md).
 
 ### Any VPS (Docker Compose)
 
