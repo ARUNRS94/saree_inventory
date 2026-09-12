@@ -89,5 +89,8 @@ async def health_db():
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
     except Exception as exc:
+        # Logged per-request so the target is visible even where start-up logs are not.
+        logger.error("Database unreachable at %s -> %s: %s", settings.database_target,
+                     type(exc).__name__, exc)
         return JSONResponse(status_code=503, content={"status": "unavailable", "detail": type(exc).__name__})
     return {"status": "ok"}
