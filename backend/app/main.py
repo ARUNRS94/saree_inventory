@@ -39,6 +39,9 @@ async def lifespan(app: FastAPI):
     if problems:
         raise RuntimeError("Unsafe production configuration:\n  - " + "\n  - ".join(problems))
 
+    logger.info("Database target: %s (prepared statements %s)", settings.database_target,
+                "off" if settings.disable_prepared_statements else "on")
+
     # Alembic owns the schema everywhere except local SQLite development.
     if settings.is_sqlite:
         async with engine.begin() as conn:

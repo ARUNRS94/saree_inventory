@@ -116,6 +116,21 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         return self.ENVIRONMENT.strip().lower() in {"production", "prod"}
 
+    @property
+    def database_target(self) -> str:
+        """Where we are about to connect, password replaced by its length. For start-up logging."""
+        parts = urlsplit(self.async_database_url)
+        if not parts.hostname:
+            return self.async_database_url.split("://", 1)[0] + "://<no host>"
+        port = f":{parts.port}" if parts.port else ""
+        secret = parts.password or ""
+        shape = f"len={len(secret)}"
+        if secret != secret.strip():
+            shape += ",HAS-WHITESPACE"
+        if secret[:1] in {'"', "'"} or secret[-1:] in {'"', "'"}:
+            shape += ",HAS-QUOTES"
+        return f"{parts.username}:<{shape}>@{parts.hostname}{port}{parts.path}"
+
     def validate_for_production(self) -> list[str]:
         """Configuration that is safe locally but dangerous once deployed."""
         problems = []
