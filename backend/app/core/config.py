@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     DB_POOL_RECYCLE_SECONDS: int = 300
     # Required when connecting through a transaction-mode pooler (Neon "-pooler" host, Supabase pgbouncer).
     DB_DISABLE_PREPARED_STATEMENTS: bool = False
+    # Temporarily exposes the connection target (never the password) on /api/health/db failures.
+    DB_DIAGNOSTICS: bool = False
 
     # Argon2id cost. Defaults follow the OWASP minimum (m=19MiB, t=2, p=1), which suits
     # the single vCPU a serverless container gets; the library default of p=4 just contends.

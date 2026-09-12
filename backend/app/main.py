@@ -92,5 +92,9 @@ async def health_db():
         # Logged per-request so the target is visible even where start-up logs are not.
         logger.error("Database unreachable at %s -> %s: %s", settings.database_target,
                      type(exc).__name__, exc)
-        return JSONResponse(status_code=503, content={"status": "unavailable", "detail": type(exc).__name__})
+        body = {"status": "unavailable", "detail": type(exc).__name__}
+        if settings.DB_DIAGNOSTICS:
+            body["target"] = settings.database_target
+            body["error"] = str(exc)[:300]
+        return JSONResponse(status_code=503, content=body)
     return {"status": "ok"}
