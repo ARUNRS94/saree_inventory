@@ -74,7 +74,6 @@ export default function ContactsPage() {
         <ImportDialog
           entity="contacts"
           title="Contacts"
-          columns={['name*', 'type*', 'contact_person', 'phone', 'gst_no', 'address']}
           onClose={() => setShowImport(false)}
           onImported={load}
         />

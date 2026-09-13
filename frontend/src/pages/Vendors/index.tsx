@@ -80,9 +80,6 @@ export default function VendorsPage() {
         <ImportDialog
           entity={importEntity}
           title={importEntity === 'vendors' ? 'Vendors' : 'Process Types'}
-          columns={importEntity === 'vendors'
-            ? ['vendor_name*', 'process_type*', 'contact_person', 'phone', 'gst_no', 'address']
-            : ['process_type*']}
           onClose={() => setImportEntity(null)}
           onImported={load}
         />

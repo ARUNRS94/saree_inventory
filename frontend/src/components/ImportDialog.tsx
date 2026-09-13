@@ -1,5 +1,6 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import api from '@/services/api';
+import { downloadFile } from '@/utils/download';
 import { Upload, Download, X } from 'lucide-react';
 
 interface ImportError {
@@ -14,30 +15,39 @@ interface ImportResult {
   errors: ImportError[];
 }
 
+interface ImportSpec {
+  entity: string;
+  columns: string[];
+  required: string[];
+  key: string;
+}
+
 interface Props {
   entity: 'items' | 'contacts' | 'vendors' | 'process-types';
   title: string;
-  columns: string[];
   onClose: () => void;
   onImported: () => void;
 }
 
-export function ImportDialog({ entity, title, columns, onClose, onImported }: Props) {
+export function ImportDialog({ entity, title, onClose, onImported }: Props) {
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState<ImportResult | null>(null);
+  const [spec, setSpec] = useState<ImportSpec | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Read the shape from the server so it always matches the downloadable template.
+  useEffect(() => {
+    api.get<ImportSpec[]>('/imports')
+      .then((r) => setSpec(r.data.find((s) => s.entity === entity) ?? null))
+      .catch(() => setError('Could not load the import format.'));
+  }, [entity]);
 
   const downloadTemplate = async () => {
     setError('');
     try {
-      const res = await api.get(`/imports/${entity}/template`, { responseType: 'blob' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(res.data);
-      a.download = `${entity}_template.csv`;
-      a.click();
-      URL.revokeObjectURL(a.href);
+      await downloadFile(`/imports/${entity}/template`, `${entity}_template.csv`);
     } catch {
       setError('Could not download the template.');
     }
@@ -72,16 +82,22 @@ export function ImportDialog({ entity, title, columns, onClose, onImported }: Pr
         <div className="p-6 space-y-4">
           <div>
             <p className="text-sm text-gray-600 mb-2">
-              Upload a CSV with these columns. Rows whose key already exists are skipped, not overwritten.
+              Upload a CSV with these columns. Rows whose {spec?.key ?? 'key'} already exists are skipped, not overwritten.
             </p>
             <div className="flex flex-wrap gap-1">
-              {columns.map((c) => (
-                <span key={c} className="text-xs bg-gray-50 text-gray-600 px-1.5 py-0.5 rounded font-mono">{c}</span>
+              {(spec?.columns ?? []).map((c) => (
+                <span key={c} className="text-xs bg-gray-50 text-gray-600 px-1.5 py-0.5 rounded font-mono">
+                  {c}{spec?.required.includes(c) ? '*' : ''}
+                </span>
               ))}
             </div>
           </div>
 
-          <button className="btn-secondary text-sm flex items-center gap-1.5" onClick={downloadTemplate}>
+          <button
+            className="btn-secondary text-sm flex items-center gap-1.5"
+            onClick={downloadTemplate}
+            disabled={!spec}
+          >
             <Download className="h-4 w-4" /> Download template
           </button>
 

@@ -72,7 +72,6 @@ export default function ItemsPage() {
         <ImportDialog
           entity="items"
           title="Items"
-          columns={['code*', 'name*', 'type', 'remarks', 'color']}
           onClose={() => setShowImport(false)}
           onImported={load}
         />
