@@ -1,36 +1,16 @@
-import asyncio
 from decimal import Decimal
-from datetime import date
 
 import pytest
-import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import Base
-from app.models import *  # noqa: F401,F403
 from app.services.master_service import MasterService
 from app.services.purchase_service import PurchaseLine, PurchaseService
 from app.services.jobwork_service import JobWorkService
 from app.services.inventory_service import InventoryService
 from app.services.dashboard_service import DashboardService
 from app.services.auth_service import AuthService
-from app.services.rbac_service import seed_rbac
 
-# Use SQLite for tests
-TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
-engine = create_async_engine(TEST_DB_URL, echo=False)
-TestSession = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-
-@pytest_asyncio.fixture
-async def db():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    async with TestSession() as session:
-        await seed_rbac(session)
-        yield session
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+# The `db` fixture lives in conftest.py.
 
 
 # --- Master Data ---
