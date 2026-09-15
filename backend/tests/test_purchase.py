@@ -12,23 +12,15 @@ from app.models.stock_ledger import StockLedger
 from app.services.inventory_service import InventoryService
 from app.services.master_service import MasterService
 from app.services.purchase_service import PurchaseLine, PurchaseService
+from factories import DataBuilder
 
 
 async def _sub_vendor_setup(db: AsyncSession):
     """RM stock on hand, plus the three items a Sub vendor order needs."""
-    master = MasterService(db)
-    rm_vendor = await master.create_contact("RM Vendor", "Raw Material Vendor")
-    sub_vendor = await master.create_contact("Dye House", "Sub vendor")
-    rm = await master.create_item("RM1", "Grey Fabric", item_type="RM")
-    wip = await master.create_item("SP1", "Dyeing", item_type="Sub process")
-    fg = await master.create_item("FG1", "Dyed Saree", item_type="FG")
-    await db.flush()
-
-    svc = PurchaseService(db)
-    po = await svc.create_po(rm_vendor.contact_id, [PurchaseLine(rm.item_id, 100, Decimal("50"))])
-    await svc.receive_grn(po.po_id, [(rm.item_id, 100, 0, Decimal("50"))])
-    await db.flush()
-    return svc, sub_vendor, rm, wip, fg
+    build = DataBuilder(db)
+    data = await build.masters()
+    await build.buy(data.alpha, data.cotton, 100, "50", receive=100)
+    return build.purchase, data.dye_house, data.cotton, data.dyeing, data.cotton_saree
 
 
 # --- creation rules ---

@@ -11,12 +11,10 @@ from app.services.import_service import (
     ENTITY_SPECS, ImportService, build_template, export_csv,
 )
 from app.services.master_service import MasterService
-
-
-def _csv(rows: list[list[str]]) -> bytes:
-    buffer = io.StringIO()
-    csv.writer(buffer).writerows(rows)
-    return buffer.getvalue().encode("utf-8")
+from factories import (
+    CONTACTS, CONTACTS_CSV, ITEMS, ITEMS_CSV, PROCESS_TYPES_CSV, VENDORS_CSV,
+    csv_bytes as _csv, csv_rows,
+)
 
 
 # --- templates ---
@@ -252,3 +250,42 @@ async def test_export_respects_sorting(db: AsyncSession):
 async def test_export_empty_table_still_has_a_header(db: AsyncSession):
     rows = list(csv.reader(io.StringIO(await export_csv(db, "contacts"))))
     assert rows == [ENTITY_SPECS["contacts"].columns]
+
+
+# --- the shared sample catalogue, loaded through the importer ---
+
+async def test_sample_catalogue_imports_cleanly(db: AsyncSession):
+    """The same data other tests build via services must also load from CSV."""
+    service = ImportService(db)
+    items = await service.import_csv("items", ITEMS_CSV)
+    contacts = await service.import_csv("contacts", CONTACTS_CSV)
+    process_types = await service.import_csv("process-types", PROCESS_TYPES_CSV)
+    vendors = await service.import_csv("vendors", VENDORS_CSV)
+
+    assert [r.errors for r in (items, contacts, process_types, vendors)] == [[], [], [], []]
+    assert items.imported == len(ITEMS)
+    assert contacts.imported == len(CONTACTS)
+    assert vendors.imported == 2
+
+    master = MasterService(db)
+    assert (await master.search_items("", "RM"))[1] == 2
+    assert (await master.search_items("", "Sub process"))[1] == 2
+    assert (await master.search_items("", "FG"))[1] == 2
+    assert (await master.search_contacts("", "Customer"))[1] == 1
+
+
+async def test_sample_catalogue_is_idempotent(db: AsyncSession):
+    service = ImportService(db)
+    await service.import_csv("items", ITEMS_CSV)
+    second = await service.import_csv("items", ITEMS_CSV)
+    assert (second.imported, second.skipped) == (0, len(ITEMS))
+
+
+async def test_sample_catalogue_survives_an_export_round_trip(db: AsyncSession):
+    await ImportService(db).import_csv("items", ITEMS_CSV)
+    exported = csv_rows(await export_csv(db, "items", sort_by="item_code"))
+
+    assert exported[0] == ENTITY_SPECS["items"].columns
+    assert [row[0] for row in exported[1:]] == sorted(code for code, *_ in ITEMS)
+    # Types survive as labels, which is what the importer accepts back.
+    assert {row[2] for row in exported[1:]} == {"Raw Material", "Sub Process", "Finished Goods"}
