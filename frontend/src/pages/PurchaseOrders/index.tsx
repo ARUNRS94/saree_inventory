@@ -24,7 +24,8 @@ export default function PurchaseOrdersPage() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [items, setItems] = useState<Item[]>([]);
   const [allItems, setAllItems] = useState<Item[]>([]);
-  const [form, setForm] = useState({ contact_id: '', item_id: '', stock_out_item_id: '', target_fg_item_id: '', quantity: 1, rate: 0, remarks: '' });
+  // Numeric fields are held as strings so the box can be cleared instead of snapping back to 0.
+  const [form, setForm] = useState({ contact_id: '', item_id: '', stock_out_item_id: '', target_fg_item_id: '', quantity: '', rate: '', remarks: '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -53,7 +54,7 @@ export default function PurchaseOrdersPage() {
     setItems(allItems.filter((s) => s.item_type === itemType));
   }, [form.contact_id, allItems, isSubVendor]);
 
-  const openNew = () => { setForm({ contact_id: '', item_id: '', stock_out_item_id: '', target_fg_item_id: '', quantity: 1, rate: 0, remarks: '' }); setShowForm(true); setError(''); };
+  const openNew = () => { setForm({ contact_id: '', item_id: '', stock_out_item_id: '', target_fg_item_id: '', quantity: '', rate: '', remarks: '' }); setShowForm(true); setError(''); };
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -65,8 +66,8 @@ export default function PurchaseOrdersPage() {
         remarks: form.remarks || null,
         items: [{
           item_id: Number(form.item_id),
-          quantity: form.quantity,
-          rate: form.rate,
+          quantity: Number(form.quantity),
+          rate: Number(form.rate),
           stock_out_item_id: isSubVendor && form.stock_out_item_id ? Number(form.stock_out_item_id) : null,
           target_fg_item_id: isSubVendor && form.target_fg_item_id ? Number(form.target_fg_item_id) : null,
         }],
@@ -120,7 +121,7 @@ export default function PurchaseOrdersPage() {
                     {rmfgItems.map((s) => <option key={s.item_id} value={s.item_id}>{s.item_code} - {s.item_name} ({itemTypeLabel(s.item_type)})</option>)}
                   </select>
                 </div>
-                <div><label className="label">Target FG Item *</label>
+                <div><label className="label">Target FG Item (For GRN) *</label>
                   <select className="input" value={form.target_fg_item_id} onChange={(e) => setForm({ ...form, target_fg_item_id: e.target.value })} required>
                     <option value="">Select</option>
                     {fgItems.map((s) => <option key={s.item_id} value={s.item_id}>{s.item_code} - {s.item_name}</option>)}
@@ -128,9 +129,9 @@ export default function PurchaseOrdersPage() {
                 </div>
               </>
             )}
-            <div><label className="label">Quantity *</label><input className="input" type="number" min={1} value={form.quantity} onChange={(e) => setForm({ ...form, quantity: Number(e.target.value) })} required /></div>
-            <div><label className="label">Rate / Process Charges *</label><input className="input" type="number" min={0} step={0.01} value={form.rate} onChange={(e) => setForm({ ...form, rate: Number(e.target.value) })} required /></div>
-            <div><label className="label">Amount</label><p className="input bg-gray-50">{formatCurrency(form.quantity * form.rate)}</p></div>
+            <div><label className="label">Quantity *</label><input className="input" type="number" min={1} value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} required /></div>
+            <div><label className="label">Rate / Process Charges *</label><input className="input" type="number" min={0} step={0.01} value={form.rate} onChange={(e) => setForm({ ...form, rate: e.target.value })} required /></div>
+            <div><label className="label">Amount</label><p className="input bg-gray-50">{formatCurrency(Number(form.quantity || 0) * Number(form.rate || 0))}</p></div>
             <div><label className="label">Remarks</label><input className="input" value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })} /></div>
             <div className="sm:col-span-2 lg:col-span-3 flex gap-2">
               <button type="submit" className="btn-primary text-sm" disabled={saving}>{saving ? 'Creating...' : 'Create PO'}</button>

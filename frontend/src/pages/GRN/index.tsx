@@ -19,8 +19,9 @@ export default function GRNPage() {
   const [showForm, setShowForm] = useState(false);
   const [openPOs, setOpenPOs] = useState<PurchaseOrder[]>([]);
   const [stockInItems, setStockInItems] = useState<{ id: number; label: string }[]>([]);
-  const [pendingQty, setPendingQty] = useState(0);
-  const [form, setForm] = useState({ po_id: '', item_id: '', received_qty: 0, damaged_qty: 0, rate: 0, remarks: '' });
+  const [pendingQty, setPendingQty] = useState<number | null>(null);
+  // Numeric fields are held as strings so the box can be cleared instead of snapping back to 0.
+  const [form, setForm] = useState({ po_id: '', item_id: '', received_qty: '', damaged_qty: '', rate: '', remarks: '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -53,18 +54,18 @@ export default function GRNPage() {
   }, [selectedPO]);
 
   useEffect(() => {
-    if (!form.po_id || !form.item_id) { setPendingQty(0); return; }
+    if (!form.po_id || !form.item_id) { setPendingQty(null); return; }
     const isSubVendor = selectedPO?.contact_type === SUB_VENDOR;
     api.get(`/purchase-orders/${form.po_id}/pending-qty`, { params: isSubVendor ? {} : { item_id: form.item_id } })
       .then((r) => setPendingQty(r.data.pending_qty));
     // Set rate from PO
     if (selectedPO) {
       const poItem = selectedPO.items[0];
-      if (poItem) setForm((f) => ({ ...f, rate: poItem.rate }));
+      if (poItem) setForm((f) => ({ ...f, rate: String(poItem.rate) }));
     }
   }, [form.po_id, form.item_id, selectedPO]);
 
-  const openNew = () => { setForm({ po_id: '', item_id: '', received_qty: 0, damaged_qty: 0, rate: 0, remarks: '' }); setShowForm(true); setError(''); };
+  const openNew = () => { setForm({ po_id: '', item_id: '', received_qty: '', damaged_qty: '', rate: '', remarks: '' }); setShowForm(true); setError(''); };
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -73,7 +74,7 @@ export default function GRNPage() {
     try {
       const res = await api.post('/grns', {
         po_id: Number(form.po_id), grn_date: null, remarks: form.remarks || null,
-        items: [{ item_id: Number(form.item_id), received_qty: form.received_qty, damaged_qty: form.damaged_qty, rate: form.rate }],
+        items: [{ item_id: Number(form.item_id), received_qty: Number(form.received_qty || 0), damaged_qty: Number(form.damaged_qty || 0), rate: Number(form.rate || 0) }],
       });
       setSuccess(`GRN ${res.data.grn_number} saved and stock updated.`);
       setShowForm(false); load();
@@ -104,10 +105,10 @@ export default function GRNPage() {
                 {stockInItems.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
               </select>
             </div>
-            <div><label className="label">Pending Qty</label><p className="input bg-gray-50">{pendingQty}</p></div>
-            <div><label className="label">Received Qty *</label><input className="input" type="number" min={0} value={form.received_qty} onChange={(e) => setForm({ ...form, received_qty: Number(e.target.value) })} required /></div>
-            <div><label className="label">Damaged Qty</label><input className="input" type="number" min={0} value={form.damaged_qty} onChange={(e) => setForm({ ...form, damaged_qty: Number(e.target.value) })} /></div>
-            <div><label className="label">Rate</label><input className="input" type="number" min={0} step={0.01} value={form.rate} onChange={(e) => setForm({ ...form, rate: Number(e.target.value) })} /></div>
+            <div><label className="label">Pending Qty</label><p className="input bg-gray-50">{pendingQty ?? ''}</p></div>
+            <div><label className="label">Received Qty *</label><input className="input" type="number" min={0} value={form.received_qty} onChange={(e) => setForm({ ...form, received_qty: e.target.value })} required /></div>
+            <div><label className="label">Damaged Qty</label><input className="input" type="number" min={0} value={form.damaged_qty} onChange={(e) => setForm({ ...form, damaged_qty: e.target.value })} /></div>
+            <div><label className="label">Rate</label><input className="input" type="number" min={0} step={0.01} value={form.rate} onChange={(e) => setForm({ ...form, rate: e.target.value })} /></div>
             <div className="sm:col-span-2 lg:col-span-3 flex gap-2">
               <button type="submit" className="btn-primary text-sm" disabled={saving}>{saving ? 'Saving...' : 'Save GRN'}</button>
               <button type="button" className="btn-secondary text-sm" onClick={() => setShowForm(false)}>Cancel</button>
