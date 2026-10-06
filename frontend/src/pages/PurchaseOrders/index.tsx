@@ -7,6 +7,7 @@ import { DataTable, Pagination } from '@/components/DataTable';
 import { StatusBadge } from '@/components/StatusBadge';
 import { LoadingState, EmptyState } from '@/components/LoadingState';
 import { useConfirmDialog } from '@/components/ConfirmDialog';
+import { Modal, DetailField } from '@/components/Modal';
 import { formatDate, formatCurrency, sumBy } from '@/utils/format';
 import { itemTypeLabel } from '@/utils/itemTypes';
 import { CUSTOMER, SUB_VENDOR } from '@/utils/contactTypes';
@@ -42,6 +43,7 @@ export default function PurchaseOrdersPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [detail, setDetail] = useState<PurchaseOrder | null>(null);
   const { confirm, dialog } = useConfirmDialog();
 
   const load = useCallback(() => {
@@ -265,7 +267,7 @@ export default function PurchaseOrdersPage() {
         </div>
         {loading ? <LoadingState /> : data.items.length === 0 ? <EmptyState /> : (
           <>
-            <DataTable keyField="po_id" data={data.items} columns={[
+            <DataTable keyField="po_id" data={data.items} onRowClick={setDetail} columns={[
               { header: 'PO No', accessor: 'po_number' },
               { header: 'Contact', accessor: 'contact_name' },
               { header: 'Type', accessor: 'contact_type', hideOnMobile: true },
@@ -275,14 +277,72 @@ export default function PurchaseOrdersPage() {
               { header: 'Qty', accessor: (r) => sumBy(r.items, (i) => i.ordered_qty) },
               { header: 'Amount', accessor: (r) => formatCurrency(sumBy(r.items, (i) => i.amount)), hideOnMobile: true },
               { header: 'Status', accessor: (r) => <StatusBadge status={r.status} /> },
-              { header: '', accessor: (r) => r.status !== 'CANCELLED' && r.status !== 'CLOSED' ? (
-                <button className="text-red-600 text-xs hover:underline" onClick={(e) => { e.stopPropagation(); cancelPO(r); }}>Cancel</button>
-              ) : null },
+              { header: '', accessor: (r) => (
+                <div className="flex justify-end gap-3">
+                  <button className="text-primary-600 text-xs hover:underline" onClick={(e) => { e.stopPropagation(); setDetail(r); }}>View</button>
+                  {r.status !== 'CANCELLED' && r.status !== 'CLOSED' && (
+                    <button className="text-red-600 text-xs hover:underline" onClick={(e) => { e.stopPropagation(); cancelPO(r); }}>Cancel</button>
+                  )}
+                </div>
+              ) },
             ]} />
             <Pagination page={page} total={data.total} pageSize={data.page_size} onChange={setPage} />
           </>
         )}
       </div>
+
+      <Modal
+        open={!!detail}
+        title={detail ? `Purchase Order ${detail.po_number}` : ''}
+        subtitle={detail ? `${detail.contact_name ?? '-'} (${detail.contact_type ?? '-'})` : undefined}
+        onClose={() => setDetail(null)}
+      >
+        {detail && (
+          <>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+              <DetailField label="PO Date" value={formatDate(detail.po_date)} />
+              <DetailField label="Expected Date" value={formatDate(detail.expected_date)} />
+              <DetailField label="Status" value={<StatusBadge status={detail.status} />} />
+              <DetailField label="Total Amount" value={formatCurrency(sumBy(detail.items, (i) => i.amount))} />
+              <div className="col-span-2 sm:col-span-4">
+                <DetailField label="Remarks" value={detail.remarks || '-'} />
+              </div>
+            </div>
+
+            <h4 className="font-medium text-sm mb-2">Items ({detail.items.length})</h4>
+            <div className="overflow-x-auto border border-gray-200 rounded-lg">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 text-gray-600">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium">#</th>
+                    <th className="px-3 py-2 text-left font-medium">Stock In Item</th>
+                    {detail.contact_type === SUB_VENDOR && <th className="px-3 py-2 text-left font-medium">Stock Out</th>}
+                    {detail.contact_type === SUB_VENDOR && <th className="px-3 py-2 text-left font-medium">Target FG</th>}
+                    <th className="px-3 py-2 text-right font-medium">Qty</th>
+                    <th className="px-3 py-2 text-right font-medium">Rate</th>
+                    <th className="px-3 py-2 text-left font-medium">LR No</th>
+                    <th className="px-3 py-2 text-right font-medium">Amount</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {detail.items.map((item, index) => (
+                    <tr key={item.po_item_id}>
+                      <td className="px-3 py-2 text-gray-500">{index + 1}</td>
+                      <td className="px-3 py-2">{item.item_code} - {item.item_name}</td>
+                      {detail.contact_type === SUB_VENDOR && <td className="px-3 py-2">{item.stock_out_item_code || '-'}</td>}
+                      {detail.contact_type === SUB_VENDOR && <td className="px-3 py-2">{item.target_fg_item_code || '-'}</td>}
+                      <td className="px-3 py-2 text-right">{item.ordered_qty}</td>
+                      <td className="px-3 py-2 text-right">{formatCurrency(item.rate)}</td>
+                      <td className="px-3 py-2">{item.lr_number || '-'}</td>
+                      <td className="px-3 py-2 text-right font-medium">{formatCurrency(item.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </Modal>
     </div>
   );
 }

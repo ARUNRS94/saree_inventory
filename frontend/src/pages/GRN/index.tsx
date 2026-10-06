@@ -6,7 +6,8 @@ import { FilterBar } from '@/components/FilterBar';
 import { DataTable, Pagination } from '@/components/DataTable';
 import { LoadingState, EmptyState } from '@/components/LoadingState';
 import { useConfirmDialog } from '@/components/ConfirmDialog';
-import { formatDate, sumBy, toNumber } from '@/utils/format';
+import { Modal, DetailField } from '@/components/Modal';
+import { formatCurrency, formatDate, sumBy, toNumber } from '@/utils/format';
 import { SUB_VENDOR } from '@/utils/contactTypes';
 
 type GRNLineForm = {
@@ -38,6 +39,7 @@ export default function GRNPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [detail, setDetail] = useState<GRN | null>(null);
   const { confirm, dialog } = useConfirmDialog();
 
   const load = useCallback(() => {
@@ -254,18 +256,74 @@ export default function GRNPage() {
         </div>
         {loading ? <LoadingState /> : data.items.length === 0 ? <EmptyState /> : (
           <>
-            <DataTable keyField="grn_id" data={data.items} columns={[
+            <DataTable keyField="grn_id" data={data.items} onRowClick={setDetail} columns={[
               { header: 'GRN No', accessor: 'grn_number' },
               { header: 'PO', accessor: 'po_number' },
               { header: 'Date', accessor: (r) => formatDate(r.grn_date) },
               { header: 'Items', accessor: (r) => r.items.map((i) => `${i.item_code} (${i.received_qty})`).join(', '), hideOnMobile: true },
               { header: 'LR No', accessor: (r) => r.items.map((i) => i.lr_number).filter(Boolean).join(', ') || '-', hideOnMobile: true },
               { header: 'Total Received', accessor: (r) => sumBy(r.items, (i) => i.received_qty) },
+              { header: '', accessor: (r) => (
+                <div className="flex justify-end">
+                  <button className="text-primary-600 text-xs hover:underline" onClick={(e) => { e.stopPropagation(); setDetail(r); }}>View</button>
+                </div>
+              ) },
             ]} />
             <Pagination page={page} total={data.total} pageSize={data.page_size} onChange={setPage} />
           </>
         )}
       </div>
+
+      <Modal
+        open={!!detail}
+        title={detail ? `GRN ${detail.grn_number}` : ''}
+        subtitle={detail ? `Against PO ${detail.po_number ?? '-'}` : undefined}
+        onClose={() => setDetail(null)}
+      >
+        {detail && (
+          <>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+              <DetailField label="GRN Date" value={formatDate(detail.grn_date)} />
+              <DetailField label="Total Received" value={sumBy(detail.items, (i) => i.received_qty)} />
+              <DetailField label="Total Damaged" value={sumBy(detail.items, (i) => i.damaged_qty)} />
+              <DetailField label="Items" value={detail.items.length} />
+              <div className="col-span-2 sm:col-span-4">
+                <DetailField label="Remarks" value={detail.remarks || '-'} />
+              </div>
+            </div>
+
+            <h4 className="font-medium text-sm mb-2">Items ({detail.items.length})</h4>
+            <div className="overflow-x-auto border border-gray-200 rounded-lg">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 text-gray-600">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium">#</th>
+                    <th className="px-3 py-2 text-left font-medium">Stock In Item</th>
+                    <th className="px-3 py-2 text-right font-medium">Received</th>
+                    <th className="px-3 py-2 text-right font-medium">Damaged</th>
+                    <th className="px-3 py-2 text-right font-medium">Rate</th>
+                    <th className="px-3 py-2 text-left font-medium">LR No</th>
+                    <th className="px-3 py-2 text-right font-medium">Value</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {detail.items.map((item, index) => (
+                    <tr key={item.grn_item_id}>
+                      <td className="px-3 py-2 text-gray-500">{index + 1}</td>
+                      <td className="px-3 py-2">{item.item_code} - {item.item_name}</td>
+                      <td className="px-3 py-2 text-right font-medium">{item.received_qty}</td>
+                      <td className="px-3 py-2 text-right">{item.damaged_qty}</td>
+                      <td className="px-3 py-2 text-right">{formatCurrency(item.rate)}</td>
+                      <td className="px-3 py-2">{item.lr_number || '-'}</td>
+                      <td className="px-3 py-2 text-right">{formatCurrency(toNumber(item.received_qty) * toNumber(item.rate))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </Modal>
     </div>
   );
 }
