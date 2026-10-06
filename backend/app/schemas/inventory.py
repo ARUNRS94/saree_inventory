@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from datetime import date
-from decimal import Decimal
 
 from pydantic import BaseModel, Field
+
+from app.schemas.types import Money
 
 
 class StockLedgerResponse(BaseModel):
@@ -16,7 +17,7 @@ class StockLedgerResponse(BaseModel):
     item_name: str | None = None
     qty_in: int
     qty_out: int
-    rate: Decimal
+    rate: Money
     remarks: str | None
 
     model_config = {"from_attributes": True}
@@ -42,8 +43,8 @@ class StockValuationResponse(BaseModel):
     item_code: str
     item_name: str
     current_stock: int
-    latest_rate: Decimal
-    value: Decimal
+    latest_rate: Money
+    value: Money
 
 
 class CustomerIssueCreate(BaseModel):

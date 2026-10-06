@@ -31,5 +31,6 @@ class GRNItem(Base):
     received_qty: Mapped[int] = mapped_column(Integer, nullable=False)
     damaged_qty: Mapped[int] = mapped_column(Integer, default=0)
     rate: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    lr_number: Mapped[str | None] = mapped_column(String(50))
 
     item: Mapped["Item"] = relationship()

@@ -5,6 +5,8 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
+from app.schemas.types import Money
+
 
 class JobWorkIssueLineCreate(BaseModel):
     item_id: int
@@ -69,7 +71,7 @@ class JobWorkReceiptItemResponse(BaseModel):
     item_name: str | None = None
     received_qty: int
     rejected_qty: int
-    process_cost: Decimal
+    process_cost: Money
 
     model_config = {"from_attributes": True}
 

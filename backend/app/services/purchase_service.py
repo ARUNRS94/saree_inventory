@@ -24,6 +24,16 @@ class PurchaseLine:
     rate: Decimal
     stock_out_item_id: int | None = None
     target_fg_item_id: int | None = None
+    lr_number: str | None = None
+
+
+@dataclass(frozen=True)
+class GRNLine:
+    item_id: int
+    received_qty: int
+    damaged_qty: int
+    rate: Decimal
+    lr_number: str | None = None
 
 
 class PurchaseService:
@@ -86,18 +96,20 @@ class PurchaseService:
                 ordered_qty=line.quantity,
                 rate=line.rate,
                 amount=line.rate * line.quantity,
+                lr_number=line.lr_number,
             ))
         self.session.add(po)
         await self.session.flush()
         return po
 
-    async def receive_grn(self, po_id: int, lines: list[tuple[int, int, int, Decimal]],
+    async def receive_grn(self, po_id: int, lines: list[GRNLine] | list[tuple[int, int, int, Decimal]],
                           grn_date: date | None = None, remarks: str | None = None) -> GRN:
         po = await self.session.get(PurchaseOrder, po_id, populate_existing=True, options=[selectinload(PurchaseOrder.contact), selectinload(PurchaseOrder.items)])
         if po is None:
             raise ValueError("Purchase order not found.")
         if not lines:
             raise ValueError("GRN requires at least one received line.")
+        receipt_lines = [line if isinstance(line, GRNLine) else GRNLine(*line) for line in lines]
 
         document_date = grn_date or date.today()
         grn = GRN(
@@ -107,7 +119,10 @@ class PurchaseService:
             remarks=remarks,
         )
         transaction_type = "SUB_VENDOR_GRN" if po.contact.contact_type == SUB_VENDOR else "PURCHASE"
-        for item_id, received_qty, damaged_qty, rate in lines:
+        # Earlier lines of this GRN are not yet persisted, so their quantities are tracked here.
+        claimed: dict[int | None, int] = {}
+        for line in receipt_lines:
+            item_id, received_qty, damaged_qty, rate = line.item_id, line.received_qty, line.damaged_qty, line.rate
             total_receipt_qty = received_qty + damaged_qty
             if received_qty < 0 or damaged_qty < 0 or total_receipt_qty <= 0:
                 raise ValueError("Received or damaged quantity is required.")
@@ -118,15 +133,20 @@ class PurchaseService:
                     raise ValueError("Sub vendor GRN stock-in item must be a Finished Goods item.")
                 if allowed_fg_ids and item_id not in allowed_fg_ids:
                     raise ValueError("GRN stock-in item must match the Finished Goods item selected on the Sub vendor PO.")
+                pending_key = None
                 pending = await self.pending_po_qty(po_id)
             else:
                 stock_in_item = await self.session.get(Item, item_id)
                 if stock_in_item is None or stock_in_item.item_type != "RM":
                     raise ValueError("Raw Material Vendor GRN stock-in item must be a Raw Material item.")
+                pending_key = item_id
                 pending = await self.pending_po_qty(po_id, item_id)
+            pending -= claimed.get(pending_key, 0)
             if total_receipt_qty > pending:
                 raise ValueError(f"Receipt quantity exceeds pending PO quantity. Pending: {pending}.")
-            grn.items.append(GRNItem(item_id=item_id, received_qty=received_qty, damaged_qty=damaged_qty, rate=rate))
+            claimed[pending_key] = claimed.get(pending_key, 0) + total_receipt_qty
+            grn.items.append(GRNItem(item_id=item_id, received_qty=received_qty, damaged_qty=damaged_qty,
+                                     rate=rate, lr_number=line.lr_number))
             if po.contact.contact_type == SUB_VENDOR:
                 await self._consume_wip(po, total_receipt_qty, document_date, grn.grn_number, rate, remarks)
             if received_qty:

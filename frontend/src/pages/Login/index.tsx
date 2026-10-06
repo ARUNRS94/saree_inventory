@@ -95,7 +95,6 @@ export default function LoginPage() {
               <Link to="/signup" className="text-primary-600 font-medium hover:underline">Sign up</Link>
             </p>
           )}
-          <p className="text-xs text-gray-400 text-center mt-4">Default: admin / admin123</p>
         </div>
       </div>
     </div>

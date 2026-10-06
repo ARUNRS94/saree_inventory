@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user, get_db
 from app.schemas.grn import GRNCreate, GRNItemResponse, GRNListResponse, GRNResponse
-from app.services.purchase_service import PurchaseService
+from app.services.purchase_service import GRNLine, PurchaseService
 
 router = APIRouter(prefix="/grns", tags=["GRN"])
 
@@ -18,6 +18,7 @@ def _grn_to_response(grn) -> GRNResponse:
         item_code=item.item.item_code if item.item else None,
         item_name=item.item.item_name if item.item else None,
         received_qty=item.received_qty, damaged_qty=item.damaged_qty, rate=item.rate,
+        lr_number=item.lr_number,
     ) for item in grn.items]
     return GRNResponse(
         grn_id=grn.grn_id, grn_number=grn.grn_number, po_id=grn.po_id,
@@ -43,7 +44,8 @@ async def list_grns(
 @router.post("", response_model=GRNResponse, status_code=201)
 async def create_grn(body: GRNCreate, db: AsyncSession = Depends(get_db), _user=Depends(get_current_user)):
     try:
-        lines = [(item.item_id, item.received_qty, item.damaged_qty, item.rate) for item in body.items]
+        lines = [GRNLine(item.item_id, item.received_qty, item.damaged_qty, item.rate, item.lr_number)
+                 for item in body.items]
         grn = await PurchaseService(db).receive_grn(body.po_id, lines, body.grn_date, body.remarks)
         from sqlalchemy.orm import selectinload
         from app.models.grn import GRN, GRNItem

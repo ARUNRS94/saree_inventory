@@ -100,6 +100,7 @@ export interface POItem {
   ordered_qty: number;
   rate: number;
   amount: number;
+  lr_number: string | null;
 }
 
 export interface PurchaseOrder {
@@ -123,6 +124,7 @@ export interface GRNItem {
   received_qty: number;
   damaged_qty: number;
   rate: number;
+  lr_number: string | null;
 }
 
 export interface GRN {

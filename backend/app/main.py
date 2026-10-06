@@ -46,6 +46,9 @@ async def lifespan(app: FastAPI):
     if settings.is_sqlite:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+    else:
+        from app.core.migrations import run_migrations
+        await run_migrations()
 
     try:
         await _bootstrap()

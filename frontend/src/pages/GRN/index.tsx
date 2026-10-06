@@ -6,8 +6,18 @@ import { FilterBar } from '@/components/FilterBar';
 import { DataTable, Pagination } from '@/components/DataTable';
 import { LoadingState, EmptyState } from '@/components/LoadingState';
 import { useConfirmDialog } from '@/components/ConfirmDialog';
-import { formatDate } from '@/utils/format';
+import { formatDate, sumBy, toNumber } from '@/utils/format';
 import { SUB_VENDOR } from '@/utils/contactTypes';
+
+type GRNLineForm = {
+  item_id: string;
+  label: string;
+  ordered_qty: number;
+  received_qty: string;
+  damaged_qty: string;
+  rate: string;
+  lr_number: string;
+};
 
 export default function GRNPage() {
   const [data, setData] = useState<PaginatedResponse<GRN>>({ items: [], total: 0, page: 1, page_size: 50 });
@@ -18,10 +28,13 @@ export default function GRNPage() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [openPOs, setOpenPOs] = useState<PurchaseOrder[]>([]);
-  const [stockInItems, setStockInItems] = useState<{ id: number; label: string }[]>([]);
-  const [pendingQty, setPendingQty] = useState<number | null>(null);
+  const [allItems, setAllItems] = useState<Item[]>([]);
+  // Sub vendor POs track pending quantity at PO level; RM vendor POs track it per item.
+  const [poPendingQty, setPoPendingQty] = useState<number | null>(null);
+  const [itemPendingQty, setItemPendingQty] = useState<Record<number, number>>({});
   // Numeric fields are held as strings so the box can be cleared instead of snapping back to 0.
-  const [form, setForm] = useState({ po_id: '', item_id: '', received_qty: '', damaged_qty: '', rate: '', remarks: '' });
+  const [form, setForm] = useState({ po_id: '', remarks: '' });
+  const [lines, setLines] = useState<GRNLineForm[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -37,44 +50,93 @@ export default function GRNPage() {
     api.get('/purchase-orders', { params: { page_size: 200 } }).then((r) => {
       setOpenPOs(r.data.items.filter((po: PurchaseOrder) => po.status !== 'CLOSED' && po.status !== 'CANCELLED'));
     });
+    api.get('/items', { params: { page_size: 500 } }).then((r) => setAllItems(r.data.items));
   }, []);
 
   const selectedPO = openPOs.find((po) => po.po_id === Number(form.po_id));
+  const isSubVendorPO = selectedPO?.contact_type === SUB_VENDOR;
+
+  // Every PO line becomes a receipt row; sub vendor POs are received as their target FG item.
+  useEffect(() => {
+    if (!selectedPO) { setLines([]); return; }
+    setLines(selectedPO.items.map((poItem) => {
+      const isSub = selectedPO.contact_type === SUB_VENDOR;
+      const stockInId = isSub ? poItem.target_fg_item_id : poItem.item_id;
+      const match = allItems.find((s) => s.item_id === stockInId);
+      const label = match
+        ? `${match.item_code} - ${match.item_name}`
+        : `${poItem.item_code ?? ''} - ${poItem.item_name ?? ''}`;
+      return {
+        item_id: stockInId ? String(stockInId) : '',
+        label: `${label} (${isSub ? 'FG' : 'RM'})`,
+        ordered_qty: poItem.ordered_qty,
+        received_qty: '',
+        damaged_qty: '',
+        rate: String(poItem.rate),
+        lr_number: poItem.lr_number ?? '',
+      };
+    }));
+  }, [selectedPO, allItems]);
 
   useEffect(() => {
-    if (!selectedPO) { setStockInItems([]); return; }
-    if (selectedPO.contact_type === SUB_VENDOR) {
-      const fgIds = new Set(selectedPO.items.map((i) => i.target_fg_item_id).filter(Boolean));
-      api.get('/items', { params: { page_size: 500 } }).then((r) => {
-        setStockInItems(r.data.items.filter((s: Item) => fgIds.has(s.item_id)).map((s: Item) => ({ id: s.item_id, label: `${s.item_code} - ${s.item_name} (FG)` })));
-      });
-    } else {
-      setStockInItems(selectedPO.items.map((i) => ({ id: i.item_id, label: `${i.item_code} - ${i.item_name} (RM)` })));
-    }
+    if (!selectedPO) { setPoPendingQty(null); setItemPendingQty({}); return; }
+    const poId = selectedPO.po_id;
+    api.get(`/purchase-orders/${poId}/pending-qty`).then((r) => setPoPendingQty(r.data.pending_qty));
+    if (selectedPO.contact_type === SUB_VENDOR) { setItemPendingQty({}); return; }
+    const itemIds = Array.from(new Set(selectedPO.items.map((i) => i.item_id)));
+    Promise.all(itemIds.map((id) =>
+      api.get(`/purchase-orders/${poId}/pending-qty`, { params: { item_id: id } })
+        .then((r) => [id, r.data.pending_qty] as const)
+    )).then((entries) => setItemPendingQty(Object.fromEntries(entries)));
   }, [selectedPO]);
 
-  useEffect(() => {
-    if (!form.po_id || !form.item_id) { setPendingQty(null); return; }
-    const isSubVendor = selectedPO?.contact_type === SUB_VENDOR;
-    api.get(`/purchase-orders/${form.po_id}/pending-qty`, { params: isSubVendor ? {} : { item_id: form.item_id } })
-      .then((r) => setPendingQty(r.data.pending_qty));
-    // Set rate from PO
-    if (selectedPO) {
-      const poItem = selectedPO.items[0];
-      if (poItem) setForm((f) => ({ ...f, rate: String(poItem.rate) }));
-    }
-  }, [form.po_id, form.item_id, selectedPO]);
+  const lineTotal = (line: GRNLineForm) => toNumber(line.received_qty) + toNumber(line.damaged_qty);
 
-  const openNew = () => { setForm({ po_id: '', item_id: '', received_qty: '', damaged_qty: '', rate: '', remarks: '' }); setShowForm(true); setError(''); };
+  // Pending is shared across rows drawing on the same pool, so other rows' entries come off it.
+  const pendingFor = (index: number) => {
+    const row = lines[index];
+    if (!row?.item_id) return null;
+    const reported = isSubVendorPO ? poPendingQty : itemPendingQty[Number(row.item_id)] ?? null;
+    if (reported === null) return null;
+    const claimedElsewhere = lines.reduce(
+      (sum, other, i) => (i !== index && (isSubVendorPO || other.item_id === row.item_id) ? sum + lineTotal(other) : sum),
+      0,
+    );
+    return Math.max(reported - claimedElsewhere, 0);
+  };
+
+  const updateLine = (index: number, patch: Partial<GRNLineForm>) =>
+    setLines((prev) => prev.map((line, i) => (i === index ? { ...line, ...patch } : line)));
+
+  const receiveAllPending = () =>
+    setLines((prev) => prev.map((line, i) => {
+      const remaining = pendingFor(i);
+      return remaining === null ? line : { ...line, received_qty: String(remaining) };
+    }));
+
+  const openNew = () => { setForm({ po_id: '', remarks: '' }); setLines([]); setShowForm(true); setError(''); };
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!(await confirm('Save GRN', 'Save this GRN and post stock movements?'))) return;
+    const received = lines.filter((line) => lineTotal(line) > 0);
+    if (received.length === 0) { setError('Enter a received or damaged quantity on at least one item.'); return; }
+    const overBooked = lines.findIndex((line, i) => {
+      const remaining = pendingFor(i);
+      return remaining !== null && lineTotal(line) > remaining;
+    });
+    if (overBooked >= 0) { setError(`${lines[overBooked].label} exceeds the pending quantity on this PO.`); return; }
+    if (!(await confirm('Save GRN', `Save this GRN with ${received.length} item(s) and post stock movements?`))) return;
     setSaving(true); setError(''); setSuccess('');
     try {
       const res = await api.post('/grns', {
         po_id: Number(form.po_id), grn_date: null, remarks: form.remarks || null,
-        items: [{ item_id: Number(form.item_id), received_qty: Number(form.received_qty || 0), damaged_qty: Number(form.damaged_qty || 0), rate: Number(form.rate || 0) }],
+        items: received.map((line) => ({
+          item_id: Number(line.item_id),
+          received_qty: Number(line.received_qty || 0),
+          damaged_qty: Number(line.damaged_qty || 0),
+          rate: Number(line.rate || 0),
+          lr_number: line.lr_number || null,
+        })),
       });
       setSuccess(`GRN ${res.data.grn_number} saved and stock updated.`);
       setShowForm(false); load();
@@ -92,26 +154,91 @@ export default function GRNPage() {
       {showForm && (
         <div className="card p-4 sm:p-6 mb-6">
           <h3 className="font-semibold mb-4">New GRN</h3>
-          <form onSubmit={save} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            <div><label className="label">Purchase Order *</label>
-              <select className="input" value={form.po_id} onChange={(e) => setForm({ ...form, po_id: e.target.value, item_id: '' })} required>
-                <option value="">Select</option>
-                {openPOs.map((po) => <option key={po.po_id} value={po.po_id}>{po.po_number} - {po.contact_name} ({po.contact_type})</option>)}
-              </select>
+          <form onSubmit={save}>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div><label className="label">Purchase Order *</label>
+                <select className="input" value={form.po_id} onChange={(e) => { setForm({ ...form, po_id: e.target.value }); setError(''); }} required>
+                  <option value="">Select</option>
+                  {openPOs.map((po) => <option key={po.po_id} value={po.po_id}>{po.po_number} - {po.contact_name} ({po.contact_type})</option>)}
+                </select>
+              </div>
+              <div className="sm:col-span-1 lg:col-span-2"><label className="label">Remarks (applies to whole GRN)</label>
+                <input className="input" value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })} />
+              </div>
             </div>
-            <div><label className="label">Stock In Item *</label>
-              <select className="input" value={form.item_id} onChange={(e) => setForm({ ...form, item_id: e.target.value })} required>
-                <option value="">Select</option>
-                {stockInItems.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
-              </select>
+
+            <div className="mt-6">
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="font-medium text-sm">Items on this PO ({lines.length})</h4>
+                {lines.length > 0 && (
+                  <button type="button" className="btn-secondary text-xs" onClick={receiveAllPending}>Receive all pending</button>
+                )}
+              </div>
+              {!selectedPO ? (
+                <p className="text-sm text-gray-500 border border-dashed border-gray-300 rounded-lg px-3 py-6 text-center">
+                  Select a purchase order to load its items.
+                </p>
+              ) : lines.length === 0 ? (
+                <p className="text-sm text-gray-500 border border-dashed border-gray-300 rounded-lg px-3 py-6 text-center">
+                  This purchase order has no items.
+                </p>
+              ) : (
+                <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 text-gray-600">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-medium">#</th>
+                        <th className="px-3 py-2 text-left font-medium">Stock In Item</th>
+                        <th className="px-3 py-2 text-right font-medium">Ordered</th>
+                        <th className="px-3 py-2 text-right font-medium">Pending</th>
+                        <th className="px-3 py-2 text-right font-medium">Received</th>
+                        <th className="px-3 py-2 text-right font-medium">Damaged</th>
+                        <th className="px-3 py-2 text-right font-medium">Rate</th>
+                        <th className="px-3 py-2 text-left font-medium">LR No</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {lines.map((line, index) => (
+                        <tr key={index}>
+                          <td className="px-3 py-2 text-gray-500">{index + 1}</td>
+                          <td className="px-3 py-2">{line.label}</td>
+                          <td className="px-3 py-2 text-right text-gray-500">{line.ordered_qty}</td>
+                          <td className="px-3 py-2 text-right font-medium">{pendingFor(index) ?? '-'}</td>
+                          <td className="px-3 py-2">
+                            <input className="input text-right" type="number" min={0} value={line.received_qty}
+                              onChange={(e) => updateLine(index, { received_qty: e.target.value })} />
+                          </td>
+                          <td className="px-3 py-2">
+                            <input className="input text-right" type="number" min={0} value={line.damaged_qty}
+                              onChange={(e) => updateLine(index, { damaged_qty: e.target.value })} />
+                          </td>
+                          <td className="px-3 py-2">
+                            <input className="input text-right" type="number" min={0} step={0.01} value={line.rate}
+                              onChange={(e) => updateLine(index, { rate: e.target.value })} />
+                          </td>
+                          <td className="px-3 py-2">
+                            <input className="input" maxLength={50} value={line.lr_number}
+                              onChange={(e) => updateLine(index, { lr_number: e.target.value })} />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {lines.length > 0 && (
+                <p className="text-xs text-gray-500 mt-2">Leave a row at zero to receive it on a later GRN.</p>
+              )}
             </div>
-            <div><label className="label">Pending Qty</label><p className="input bg-gray-50">{pendingQty ?? ''}</p></div>
-            <div><label className="label">Received Qty *</label><input className="input" type="number" min={0} value={form.received_qty} onChange={(e) => setForm({ ...form, received_qty: e.target.value })} required /></div>
-            <div><label className="label">Damaged Qty</label><input className="input" type="number" min={0} value={form.damaged_qty} onChange={(e) => setForm({ ...form, damaged_qty: e.target.value })} /></div>
-            <div><label className="label">Rate</label><input className="input" type="number" min={0} step={0.01} value={form.rate} onChange={(e) => setForm({ ...form, rate: e.target.value })} /></div>
-            <div className="sm:col-span-2 lg:col-span-3 flex gap-2">
-              <button type="submit" className="btn-primary text-sm" disabled={saving}>{saving ? 'Saving...' : 'Save GRN'}</button>
-              <button type="button" className="btn-secondary text-sm" onClick={() => setShowForm(false)}>Cancel</button>
+
+            <div className="mt-4 flex flex-wrap items-center gap-4">
+              <span className="text-sm font-medium">
+                Total received: {sumBy(lines, (l) => l.received_qty)} | damaged: {sumBy(lines, (l) => l.damaged_qty)}
+              </span>
+              <div className="flex gap-2">
+                <button type="submit" className="btn-primary text-sm" disabled={saving || lines.length === 0}>{saving ? 'Saving...' : 'Save GRN'}</button>
+                <button type="button" className="btn-secondary text-sm" onClick={() => setShowForm(false)}>Cancel</button>
+              </div>
             </div>
           </form>
         </div>
@@ -132,7 +259,8 @@ export default function GRNPage() {
               { header: 'PO', accessor: 'po_number' },
               { header: 'Date', accessor: (r) => formatDate(r.grn_date) },
               { header: 'Items', accessor: (r) => r.items.map((i) => `${i.item_code} (${i.received_qty})`).join(', '), hideOnMobile: true },
-              { header: 'Total Received', accessor: (r) => r.items.reduce((s, i) => s + i.received_qty, 0) },
+              { header: 'LR No', accessor: (r) => r.items.map((i) => i.lr_number).filter(Boolean).join(', ') || '-', hideOnMobile: true },
+              { header: 'Total Received', accessor: (r) => sumBy(r.items, (i) => i.received_qty) },
             ]} />
             <Pagination page={page} total={data.total} pageSize={data.page_size} onChange={setPage} />
           </>

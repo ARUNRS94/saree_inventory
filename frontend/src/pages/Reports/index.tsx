@@ -4,7 +4,7 @@ import type { StockSummary, StockValuation } from '@/types';
 import { PageHeader } from '@/components/PageHeader';
 import { DataTable } from '@/components/DataTable';
 import { LoadingState, EmptyState } from '@/components/LoadingState';
-import { formatCurrency } from '@/utils/format';
+import { formatCurrency, formatNumber, sumBy } from '@/utils/format';
 import { itemTypeLabel } from '@/utils/itemTypes';
 import { Download } from 'lucide-react';
 
@@ -60,12 +60,17 @@ export default function ReportsPage() {
       <div className="card">
         {loading ? <LoadingState /> : tab === 'stock' ? (
           stock.length === 0 ? <EmptyState /> : (
-            <DataTable keyField="item_id" data={stock} columns={[
-              { header: 'Code', accessor: 'item_code' },
-              { header: 'Name', accessor: 'item_name' },
-              { header: 'Type', accessor: (s) => itemTypeLabel(s.item_type) },
-              { header: 'Stock', accessor: 'current_stock', className: 'font-semibold' },
-            ]} />
+            <>
+              <DataTable keyField="item_id" data={stock} columns={[
+                { header: 'Code', accessor: 'item_code' },
+                { header: 'Name', accessor: 'item_name' },
+                { header: 'Type', accessor: (s) => itemTypeLabel(s.item_type) },
+                { header: 'Stock', accessor: 'current_stock', className: 'font-semibold' },
+              ]} />
+              <div className="px-4 py-3 border-t border-gray-100 text-right font-semibold">
+                Total: {formatNumber(sumBy(stock, (s) => s.current_stock))} pcs across {stock.length} item(s)
+              </div>
+            </>
           )
         ) : (
           valuation.length === 0 ? <EmptyState /> : (
@@ -78,7 +83,7 @@ export default function ReportsPage() {
                 { header: 'Value', accessor: (r) => formatCurrency(r.value), className: 'font-semibold' },
               ]} />
               <div className="px-4 py-3 border-t border-gray-100 text-right font-semibold">
-                Total: {formatCurrency(valuation.reduce((s, r) => s + r.value, 0))}
+                Total: {formatCurrency(sumBy(valuation, (r) => r.value))}
               </div>
             </>
           )

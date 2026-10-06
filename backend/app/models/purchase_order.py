@@ -35,6 +35,7 @@ class PurchaseOrderItem(Base):
     ordered_qty: Mapped[int] = mapped_column(Integer, nullable=False)
     rate: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    lr_number: Mapped[str | None] = mapped_column(String(50))
 
     purchase_order: Mapped[PurchaseOrder] = relationship(back_populates="items")
     item: Mapped["Item"] = relationship(foreign_keys=[item_id])

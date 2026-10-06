@@ -5,12 +5,15 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
+from app.schemas.types import Money
+
 
 class GRNLineCreate(BaseModel):
     item_id: int
     received_qty: int = Field(ge=0)
     damaged_qty: int = Field(ge=0, default=0)
     rate: Decimal = Field(ge=0)
+    lr_number: str | None = Field(default=None, max_length=50)
 
 
 class GRNCreate(BaseModel):
@@ -27,7 +30,8 @@ class GRNItemResponse(BaseModel):
     item_name: str | None = None
     received_qty: int
     damaged_qty: int
-    rate: Decimal
+    rate: Money
+    lr_number: str | None = None
 
     model_config = {"from_attributes": True}
 

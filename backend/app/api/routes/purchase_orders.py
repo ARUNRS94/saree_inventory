@@ -31,6 +31,7 @@ def _po_to_response(po) -> PurchaseOrderResponse:
             ordered_qty=item.ordered_qty,
             rate=item.rate,
             amount=item.amount,
+            lr_number=item.lr_number,
         ))
     return PurchaseOrderResponse(
         po_id=po.po_id, po_number=po.po_number, contact_id=po.contact_id,
@@ -61,6 +62,7 @@ async def create_po(body: PurchaseOrderCreate, db: AsyncSession = Depends(get_db
         lines = [PurchaseLine(
             item_id=item.item_id, quantity=item.quantity, rate=item.rate,
             stock_out_item_id=item.stock_out_item_id, target_fg_item_id=item.target_fg_item_id,
+            lr_number=item.lr_number,
         ) for item in body.items]
         po = await PurchaseService(db).create_po(
             body.contact_id, lines, body.po_date, body.expected_date, body.remarks,

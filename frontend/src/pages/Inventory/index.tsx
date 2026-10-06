@@ -5,7 +5,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { FilterBar } from '@/components/FilterBar';
 import { DataTable, Pagination } from '@/components/DataTable';
 import { LoadingState, EmptyState } from '@/components/LoadingState';
-import { formatDate } from '@/utils/format';
+import { formatDate, formatCurrency, formatNumber, sumBy } from '@/utils/format';
 import { ITEM_TYPE_OPTIONS, itemTypeLabel } from '@/utils/itemTypes';
 
 const TXN_TYPES = ['PURCHASE', 'SUB_VENDOR_ISSUE', 'WIP_STOCK_IN', 'SUB_VENDOR_GRN', 'WIP_STOCK_OUT', 'JOBWORK_ISSUE', 'JOBWORK_RECEIPT', 'CUSTOMER_ISSUE', 'STOCK_ADJUSTMENT'];
@@ -77,12 +77,17 @@ export default function InventoryPage() {
         </div>
         {loading ? <LoadingState /> : tab === 'stock' ? (
           filtered.length === 0 ? <EmptyState /> : (
-            <DataTable keyField="item_id" data={filtered} columns={[
-              { header: 'Code', accessor: 'item_code' },
-              { header: 'Name', accessor: 'item_name' },
-              { header: 'Type', accessor: (s) => itemTypeLabel(s.item_type) },
-              { header: 'Stock', accessor: 'current_stock', className: 'font-semibold' },
-            ]} />
+            <>
+              <DataTable keyField="item_id" data={filtered} columns={[
+                { header: 'Code', accessor: 'item_code' },
+                { header: 'Name', accessor: 'item_name' },
+                { header: 'Type', accessor: (s) => itemTypeLabel(s.item_type) },
+                { header: 'Stock', accessor: 'current_stock', className: 'font-semibold' },
+              ]} />
+              <div className="px-4 py-3 border-t border-gray-100 text-right font-semibold">
+                Total: {formatNumber(sumBy(filtered, (s) => s.current_stock))} pcs across {filtered.length} item(s)
+              </div>
+            </>
           )
         ) : (
           ledger.items.length === 0 ? <EmptyState /> : (
@@ -94,7 +99,7 @@ export default function InventoryPage() {
                 { header: 'Item', accessor: (r) => `${r.item_code} - ${r.item_name}` },
                 { header: 'In', accessor: 'qty_in' },
                 { header: 'Out', accessor: 'qty_out' },
-                { header: 'Rate', accessor: 'rate', hideOnMobile: true },
+                { header: 'Rate', accessor: (r) => formatCurrency(r.rate), hideOnMobile: true },
               ]} />
               <Pagination page={page} total={ledger.total} pageSize={ledger.page_size} onChange={setPage} />
             </>

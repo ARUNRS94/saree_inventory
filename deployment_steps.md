@@ -39,7 +39,14 @@ Transaction-mode poolers reject asyncpg's prepared statements, and you'll otherw
 `prepared statement "__asyncpg_stmt_1__" already exists` under load.
 
 ### 2. Run migrations
-Vercel has no release hook, so run migrations yourself before the first deploy and after any schema change:
+The backend applies pending migrations itself on start-up (`AUTO_MIGRATE`, on by default), holding a
+Postgres advisory lock so several containers booting at once cannot collide. Deploying a schema change
+needs no extra step.
+
+If `DATABASE_URL` points at a transaction pooler, set `DATABASE_URL_SYNC` to the **session** endpoint
+(Supabase port `5432`, Neon's direct host) — migrations need a session-mode connection.
+
+To take over manually instead, set `AUTO_MIGRATE=false` and run before each deploy:
 
 ```bash
 cd backend

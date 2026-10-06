@@ -5,6 +5,8 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
+from app.schemas.types import Money
+
 
 class PurchaseLineCreate(BaseModel):
     item_id: int
@@ -12,6 +14,7 @@ class PurchaseLineCreate(BaseModel):
     rate: Decimal = Field(ge=0)
     stock_out_item_id: int | None = None
     target_fg_item_id: int | None = None
+    lr_number: str | None = Field(default=None, max_length=50)
 
 
 class PurchaseOrderCreate(BaseModel):
@@ -38,8 +41,9 @@ class POItemResponse(BaseModel):
     target_fg_item_code: str | None = None
     target_fg_item_name: str | None = None
     ordered_qty: int
-    rate: Decimal
-    amount: Decimal
+    rate: Money
+    amount: Money
+    lr_number: str | None = None
 
     model_config = {"from_attributes": True}
 

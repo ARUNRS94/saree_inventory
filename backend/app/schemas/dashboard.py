@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from decimal import Decimal
-
 from pydantic import BaseModel
+
+from app.schemas.types import Money
 
 
 class DashboardCardData(BaseModel):
     total_stock_qty: int
-    stock_value: Decimal
-    open_po_value: Decimal
+    stock_value: Money
+    open_po_value: Money
     pending_po_qty: int
     vendor_wip_qty: int
     active_items: int
@@ -18,7 +18,7 @@ class DashboardCardData(BaseModel):
 
 class PurchaseTrendItem(BaseModel):
     month: str
-    value: Decimal
+    value: Money
 
 
 class StockMovementItem(BaseModel):
