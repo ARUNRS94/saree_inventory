@@ -85,7 +85,7 @@ async def health():
 
 @app.get("/api/health/db")
 async def health_db():
-    """Readiness probe: confirms the database is reachable."""
+    """Readiness probe: confirms the database is reachable and the schema is applied."""
     from sqlalchemy import text
 
     try:
@@ -100,4 +100,12 @@ async def health_db():
             body["target"] = settings.database_target
             body["error"] = str(exc)[:300]
         return JSONResponse(status_code=503, content=body)
-    return {"status": "ok"}
+
+    from app.core.migrations import schema_status
+    schema = await schema_status()
+    # Local SQLite builds its schema from metadata, so it has no revision to compare.
+    healthy = settings.is_sqlite or schema.get("current_revision") == schema.get("expected_revision")
+    body = {"status": "ok" if healthy else "schema-out-of-date", "schema": schema}
+    if settings.DB_DIAGNOSTICS:
+        body["target"] = settings.database_target
+    return body if healthy else JSONResponse(status_code=503, content=body)
