@@ -8,7 +8,8 @@ from app.core.database import Base
 from app.models import *  # noqa: F401,F403
 
 config = context.config
-config.set_main_option("sqlalchemy.url", settings.sync_database_url)
+# ConfigParser treats '%' as interpolation, and URL-encoded passwords are full of it.
+config.set_main_option("sqlalchemy.url", settings.sync_database_url.replace("%", "%%"))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

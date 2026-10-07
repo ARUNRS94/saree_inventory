@@ -6,7 +6,7 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
@@ -16,6 +16,10 @@ logger = logging.getLogger("uvicorn.error")
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 # Any fixed 64-bit key works; it only has to be the same across instances.
 _ADVISORY_LOCK_KEY = 4815162342
+
+# Any one of these proves the schema was really built, not just stamped.
+_CORE_TABLES = frozenset({"users", "roles", "permissions", "items", "contacts",
+                          "purchase_orders", "grns", "stock_ledger"})
 
 # Last start-up outcome, surfaced on /api/health/db so a silent skip is visible.
 _status: dict = {"ran": False, "detail": "Not attempted.", "error": None}
@@ -31,7 +35,27 @@ def _alembic_config() -> Config:
     return cfg
 
 
-def _upgrade_to_head() -> None:
+def _heal_orphaned_version(engine) -> bool:
+    """Dropping the app's tables leaves alembic_version behind, which makes Alembic no-op.
+
+    Clearing it is only safe when none of the real tables survive, so there is
+    nothing a replay could overwrite.
+    """
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+        present = set(inspect(conn).get_table_names())
+        if "alembic_version" not in present or _CORE_TABLES & present:
+            return False
+        stamped = conn.execute(text("SELECT version_num FROM alembic_version")).scalars().all()
+        if not stamped:
+            return False
+        conn.execute(text("DROP TABLE alembic_version"))
+        logger.warning("Found alembic_version at %s but no application tables - "
+                       "clearing it so the migrations replay from scratch.", ", ".join(stamped))
+        return True
+
+
+def _upgrade_to_head() -> bool:
+    """Returns True when a stale alembic_version had to be cleared first."""
     # A session-scoped advisory lock serialises concurrent container boots: the
     # second instance waits, then finds the database already at head and no-ops.
     # The lock is taken inside an open transaction so a transaction-mode pooler
@@ -41,8 +65,12 @@ def _upgrade_to_head() -> None:
         with lock_engine.connect() as lock_conn:
             lock_conn.execute(text("SET lock_timeout = '60s'"))
             lock_conn.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _ADVISORY_LOCK_KEY})
+            # Runs on its own connection because the repair has to commit; the
+            # advisory lock above still keeps other instances out of this block.
+            healed = _heal_orphaned_version(lock_engine)
             command.upgrade(_alembic_config(), "head")
             lock_conn.rollback()
+            return healed
     finally:
         lock_engine.dispose()
 
@@ -59,9 +87,10 @@ async def run_migrations() -> None:
         logger.warning("Migrations skipped - AUTO_MIGRATE is off. Run 'alembic upgrade head' manually.")
         return
     try:
-        await asyncio.to_thread(_upgrade_to_head)
-        _status.update(ran=True, detail="Schema is at head.", error=None)
-        logger.info("Database schema is at head.")
+        healed = await asyncio.to_thread(_upgrade_to_head)
+        detail = "Schema is at head (replayed after a stale alembic_version)." if healed else "Schema is at head."
+        _status.update(ran=True, detail=detail, error=None)
+        logger.info(detail)
     except Exception as exc:
         _status.update(ran=False, detail="Migration failed.", error=f"{type(exc).__name__}: {exc}")
         logger.exception("Automatic migration failed - run 'alembic upgrade head' manually.")
