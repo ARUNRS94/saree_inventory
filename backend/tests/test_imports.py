@@ -81,6 +81,25 @@ async def test_import_accepts_legacy_headers(db: AsyncSession):
     assert rows[0].remarks == "From the old app"
 
 
+async def test_import_generates_codes_when_the_column_is_blank(db: AsyncSession):
+    content = _csv([
+        ["code", "name", "type"],
+        ["", "Grey Fabric", "Raw Material"],
+        ["", "Dyeing", "Sub Process"],
+    ])
+    result = await ImportService(db).import_csv("items", content)
+    assert (result.imported, result.errors) == (2, [])
+
+    rows, _ = await MasterService(db).search_items()
+    assert {r.item_code for r in rows} == {"RM-0001", "SP-0001"}
+
+
+async def test_import_accepts_a_file_with_no_code_column_at_all(db: AsyncSession):
+    content = _csv([["name", "type"], ["Grey Fabric", "Raw Material"]])
+    result = await ImportService(db).import_csv("items", content)
+    assert (result.imported, result.errors) == (1, [])
+
+
 async def test_import_skips_rows_already_present(db: AsyncSession):
     master = MasterService(db)
     await master.create_item("RM001", "Existing", item_type="RM")
@@ -88,29 +107,29 @@ async def test_import_skips_rows_already_present(db: AsyncSession):
 
     content = _csv([
         ["code", "name", "type"],
-        ["rm001", "Different name, same code", "Raw Material"],
+        ["RM999", "existing", "Raw Material"],
         ["RM002", "Brand new", "Raw Material"],
     ])
     result = await ImportService(db).import_csv("items", content)
     assert result.imported == 1
     assert result.skipped == 1
 
-    existing = next(r for r in (await master.search_items())[0] if r.item_code == "RM001")
-    assert existing.item_name == "Existing", "an existing row must never be overwritten"
+    existing = next(r for r in (await master.search_items())[0] if r.item_name == "Existing")
+    assert existing.item_code == "RM001", "an existing row must never be overwritten"
 
 
 async def test_import_skips_duplicates_within_the_same_file(db: AsyncSession):
     content = _csv([
         ["code", "name", "type"],
-        ["DUP1", "First", "Raw Material"],
-        ["DUP1", "Second", "Raw Material"],
+        ["DUP1", "Same Name", "Raw Material"],
+        ["DUP2", "Same Name", "Raw Material"],
     ])
     result = await ImportService(db).import_csv("items", content)
     assert (result.imported, result.skipped) == (1, 1)
 
 
 async def test_import_rejects_a_file_missing_required_columns(db: AsyncSession):
-    content = _csv([["name", "type"], ["No code column", "Raw Material"]])
+    content = _csv([["code", "type"], ["RM1", "Raw Material"]])
     with pytest.raises(ValueError, match="Missing required column"):
         await ImportService(db).import_csv("items", content)
 
@@ -130,7 +149,7 @@ async def test_import_reports_bad_rows_without_losing_good_ones(db: AsyncSession
         ["code", "name", "type"],
         ["GOOD1", "Fine", "Raw Material"],
         ["BAD1", "Bad type", "Nonsense"],
-        ["", "Missing code", "Raw Material"],
+        ["NONAME", "", "Raw Material"],
         ["GOOD2", "Also fine", "Finished Goods"],
     ])
     result = await ImportService(db).import_csv("items", content)

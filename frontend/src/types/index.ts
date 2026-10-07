@@ -106,6 +106,7 @@ export interface POItem {
 export interface PurchaseOrder {
   po_id: number;
   po_number: string;
+  voucher_number: string | null;
   contact_id: number;
   contact_name: string | null;
   contact_type: string | null;
@@ -123,16 +124,23 @@ export interface GRNItem {
   item_name: string | null;
   received_qty: number;
   damaged_qty: number;
+  short_qty: number;
   rate: number;
   lr_number: string | null;
+  po_number: string | null;
 }
 
 export interface GRN {
   grn_id: number;
   grn_number: string;
-  po_id: number;
+  grn_type: string;
+  po_id: number | null;
   po_number: string | null;
+  voucher_number: string | null;
+  contact_id: number | null;
+  contact_name: string | null;
   grn_date: string;
+  vendor_voucher_number: string | null;
   remarks: string | null;
   items: GRNItem[];
 }
@@ -182,6 +190,8 @@ export interface StockSummary {
   item_code: string;
   item_name: string;
   item_type: string | null;
+  category: string | null;
+  vendors: string[];
   current_stock: number;
 }
 
@@ -189,6 +199,9 @@ export interface StockValuation {
   item_id: number;
   item_code: string;
   item_name: string;
+  item_type: string | null;
+  category: string | null;
+  vendors: string[];
   current_stock: number;
   latest_rate: number;
   value: number;
@@ -214,9 +227,27 @@ export interface DashboardCards {
   open_po_value: number;
   pending_po_qty: number;
   vendor_wip_qty: number;
+  damaged_qty: number;
+  short_qty: number;
   active_items: number;
   active_vendors: number;
   active_contacts: number;
+}
+
+export interface VendorPending {
+  vendor_name: string;
+  pending_qty: number;
+  open_vouchers: number;
+}
+
+export interface RecentGRN {
+  grn_number: string;
+  grn_type: string;
+  grn_date: string;
+  vendor_name: string | null;
+  received_qty: number;
+  damaged_qty: number;
+  short_qty: number;
 }
 
 export interface DashboardData {
@@ -224,6 +255,9 @@ export interface DashboardData {
   purchase_trend: { month: string; value: number }[];
   stock_movement: { month: string; qty_in: number; qty_out: number }[];
   top_categories: { category: string; qty: number }[];
+  sub_process_split: { category: string; qty: number }[];
+  vendor_pending: VendorPending[];
+  recent_grns: RecentGRN[];
 }
 
 export interface PaginatedResponse<T> {

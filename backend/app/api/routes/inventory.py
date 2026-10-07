@@ -16,9 +16,11 @@ router = APIRouter(prefix="/inventory", tags=["Inventory"])
 
 
 @router.get("/stock", response_model=list[StockSummaryResponse])
-async def get_stock(db: AsyncSession = Depends(get_db), _user=Depends(get_current_user)):
-    service = InventoryService(db)
-    rows = await service.stock_report()
+async def get_stock(
+    search: str = "", item_type: str | None = None, vendor: str | None = None, hide_zero: bool = False,
+    db: AsyncSession = Depends(get_db), _user=Depends(get_current_user),
+):
+    rows = await InventoryService(db).stock_report(search, item_type, vendor, hide_zero)
     return [StockSummaryResponse(**r) for r in rows]
 
 
@@ -29,8 +31,11 @@ async def get_stock_qty(item_id: int, db: AsyncSession = Depends(get_db), _user=
 
 
 @router.get("/valuation", response_model=list[StockValuationResponse])
-async def get_valuation(db: AsyncSession = Depends(get_db), _user=Depends(get_current_user)):
-    rows = await InventoryService(db).inventory_valuation()
+async def get_valuation(
+    search: str = "", item_type: str | None = None, vendor: str | None = None, hide_zero: bool = False,
+    db: AsyncSession = Depends(get_db), _user=Depends(get_current_user),
+):
+    rows = await InventoryService(db).inventory_valuation(search, item_type, vendor, hide_zero)
     return [StockValuationResponse(**r) for r in rows]
 
 

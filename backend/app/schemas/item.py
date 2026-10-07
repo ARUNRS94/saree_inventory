@@ -6,9 +6,10 @@ from pydantic import BaseModel, Field
 
 
 class ItemCreate(BaseModel):
-    item_code: str = Field(min_length=1, max_length=50)
+    item_code: str | None = Field(default=None, max_length=50)
     item_name: str = Field(min_length=1, max_length=200)
     item_type: str = "FG"
+    category: str | None = None
     remarks: str | None = None
     color: str | None = None
 
@@ -17,6 +18,7 @@ class ItemUpdate(BaseModel):
     item_code: str | None = None
     item_name: str | None = None
     item_type: str | None = None
+    category: str | None = None
     remarks: str | None = None
     color: str | None = None
 
@@ -26,6 +28,7 @@ class ItemResponse(BaseModel):
     item_code: str
     item_name: str
     item_type: str | None
+    category: str | None = None
     remarks: str | None
     color: str | None
     created_date: datetime | None

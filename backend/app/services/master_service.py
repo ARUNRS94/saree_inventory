@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from sqlalchemy import or_, select, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.item import Item
@@ -28,6 +29,14 @@ RAW_MATERIAL = "RM"
 SUB_PROCESS = "Sub process"
 FINISHED_GOODS = "FG"
 
+# Sub Process items are split by the work the sub vendor does.
+SUB_PROCESS_CATEGORIES = ["Dying", "Finishing"]
+SUB_PROCESS_CATEGORY_ALIASES = {value.lower(): value for value in SUB_PROCESS_CATEGORIES}
+
+# Item codes are generated, so each type gets its own running series.
+ITEM_CODE_PREFIXES = {RAW_MATERIAL: "RM", SUB_PROCESS: "SP", FINISHED_GOODS: "FG"}
+_CODE_RETRIES = 5
+
 # Codes are what we store; labels are what users see and what reports print.
 ITEM_TYPE_LABELS = {"RM": "Raw Material", "Sub process": "Sub Process", "FG": "Finished Goods"}
 ITEM_TYPE_ALIASES = {label.lower(): code for code, label in ITEM_TYPE_LABELS.items()}
@@ -51,10 +60,16 @@ def normalise_contact_type(value: str | None) -> str | None:
     return CONTACT_TYPE_ALIASES.get(value.strip().lower())
 
 
+def normalise_category(value: str | None) -> str | None:
+    if not value:
+        return None
+    return SUB_PROCESS_CATEGORY_ALIASES.get(value.strip().lower())
+
+
 # Whitelisted sort columns, keyed by the value the client sends.
 ITEM_SORTS = {
     "item_code": Item.item_code, "item_name": Item.item_name,
-    "item_type": Item.item_type, "remarks": Item.remarks,
+    "item_type": Item.item_type, "category": Item.category, "remarks": Item.remarks,
     "color": Item.color, "created_date": Item.created_date,
 }
 CONTACT_SORTS = {
@@ -172,21 +187,52 @@ class MasterService:
         return list(result.scalars().all()), total
 
     # --- Items ---
-    async def create_item(self, item_code: str, item_name: str, **values: object) -> Item:
-        if not item_code.strip() or not item_name.strip():
-            raise ValueError("Item code and name are required.")
-        item_type = values.get("item_type") or "FG"
+    async def next_item_code(self, item_type: str) -> str:
+        """Codes are no longer typed in by hand, so each item type runs its own series."""
+        prefix = ITEM_CODE_PREFIXES.get(item_type, "IT")
+        result = await self.session.scalars(select(Item.item_code).where(Item.item_code.like(f"{prefix}-%")))
+        highest = 0
+        for code in result:
+            suffix = (code or "").rsplit("-", 1)[-1]
+            if suffix.isdigit():
+                highest = max(highest, int(suffix))
+        return f"{prefix}-{highest + 1:04d}"
+
+    async def create_item(self, item_code: str | None, item_name: str, **values: object) -> Item:
+        if not item_name.strip():
+            raise ValueError("Item name is required.")
+        item_type = str(values.get("item_type") or "FG")
         if item_type not in ITEM_TYPES:
             raise ValueError("Select a valid item type.")
-        item = Item(item_code=item_code.strip().upper(), item_name=item_name.strip(), **values)
-        self.session.add(item)
-        await self.session.flush()
-        return item
+        values["item_type"] = item_type
+        values["category"] = self._resolve_category(item_type, values.get("category"))
+        name = item_name.strip()
+        supplied = (item_code or "").strip().upper()
+
+        # Generated codes are read-then-insert, so two concurrent writers can pick the
+        # same number. A savepoint lets us take the next one instead of failing the request.
+        for attempt in range(_CODE_RETRIES):
+            code = supplied or await self.next_item_code(item_type)
+            item = Item(item_code=code, item_name=name, **values)
+            try:
+                async with self.session.begin_nested():
+                    self.session.add(item)
+                    await self.session.flush()
+                return item
+            except IntegrityError:
+                if supplied:
+                    raise ValueError(f"Item code {code} already exists.")
+                if attempt == _CODE_RETRIES - 1:
+                    raise ValueError("Could not allocate an item code. Please try again.")
+        raise ValueError("Could not allocate an item code. Please try again.")
 
     async def update_item(self, item_id: int, **values: object) -> Item:
         item = await self.session.get(Item, item_id)
         if item is None:
             raise ValueError("Item not found.")
+        item_type = str(values.get("item_type") or item.item_type or "FG")
+        if "item_type" in values or "category" in values:
+            item.category = self._resolve_category(item_type, values.pop("category", item.category))
         for key, val in values.items():
             if val is not None:
                 if key == "item_code":
@@ -194,6 +240,16 @@ class MasterService:
                 setattr(item, key, val)
         await self.session.flush()
         return item
+
+    @staticmethod
+    def _resolve_category(item_type: str, category: object) -> str | None:
+        """Only Sub Process items carry a category; anything else is cleared."""
+        if item_type != SUB_PROCESS or not category:
+            return None
+        resolved = normalise_category(str(category))
+        if resolved is None:
+            raise ValueError(f"Category must be one of: {', '.join(SUB_PROCESS_CATEGORIES)}.")
+        return resolved
 
     async def search_items(self, text: str = "", item_type: str | None = None,
                             page: int = 1, page_size: int = 50,
@@ -208,7 +264,7 @@ class MasterService:
             text_filter = or_(
                 Item.item_code.ilike(like), Item.item_name.ilike(like),
                 Item.remarks.ilike(like), Item.color.ilike(like),
-                Item.item_type.ilike(like),
+                Item.category.ilike(like), Item.item_type.ilike(like),
             )
             stmt = stmt.where(text_filter)
             count_stmt = count_stmt.where(text_filter)

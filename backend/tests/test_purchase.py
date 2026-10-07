@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.stock_ledger import StockLedger
 from app.services.inventory_service import InventoryService
 from app.services.master_service import MasterService
-from app.services.purchase_service import PurchaseLine, PurchaseService
+from app.services.purchase_service import GRNLine, PurchaseLine, PurchaseService
 from factories import DataBuilder
 
 
@@ -203,9 +203,9 @@ async def test_grn_rejects_zero_and_negative_quantities(db: AsyncSession, master
     item = await masters.create_item("RM1", "RM", item_type="RM")
     await db.flush()
     po = await purchase.create_po(contact.contact_id, [PurchaseLine(item.item_id, 10, Decimal("5"))])
-    with pytest.raises(ValueError, match="Received or damaged quantity is required"):
+    with pytest.raises(ValueError, match="Received, damaged/NC or short quantity is required"):
         await purchase.receive_grn(po.po_id, [(item.item_id, 0, 0, Decimal("5"))])
-    with pytest.raises(ValueError, match="Received or damaged quantity is required"):
+    with pytest.raises(ValueError, match="Received, damaged/NC or short quantity is required"):
         await purchase.receive_grn(po.po_id, [(item.item_id, -1, 0, Decimal("5"))])
 
 
@@ -294,3 +294,66 @@ async def test_document_numbers_increment_within_the_year(db: AsyncSession, mast
     other_year = await purchase.create_po(contact.contact_id, [PurchaseLine(item.item_id, 1, Decimal("1"))],
                                           po_date=date(2027, 1, 1))
     assert other_year.po_number == "PO-2027-0001"
+
+
+# --- direct Raw Material GRN and sub vendor short quantities ---
+
+async def test_direct_rm_grn_posts_stock_without_a_voucher(db: AsyncSession, masters: MasterService,
+                                                           purchase: PurchaseService):
+    vendor = await masters.create_contact("Acme", "Raw Material Vendor")
+    item = await masters.create_item(None, "Grey Fabric", item_type="RM")
+    await db.flush()
+    grn = await purchase.receive_direct_grn(vendor.contact_id, [
+        GRNLine(item_id=item.item_id, received_qty=40, rate=Decimal("12.5"), po_number="PO-EXT-9"),
+    ])
+    assert grn.po_id is None
+    assert grn.grn_type == "RM"
+    assert grn.items[0].po_number == "PO-EXT-9"
+    assert await InventoryService(db).current_stock(item.item_id) == 40
+
+
+async def test_direct_rm_grn_requires_a_po_number(db: AsyncSession, masters: MasterService,
+                                                  purchase: PurchaseService):
+    vendor = await masters.create_contact("Acme", "Raw Material Vendor")
+    item = await masters.create_item(None, "Grey Fabric", item_type="RM")
+    await db.flush()
+    with pytest.raises(ValueError, match="PO Number is required"):
+        await purchase.receive_direct_grn(vendor.contact_id, [
+            GRNLine(item_id=item.item_id, received_qty=5, rate=Decimal("1")),
+        ])
+
+
+async def test_direct_rm_grn_rejects_a_sub_vendor(db: AsyncSession, masters: MasterService,
+                                                  purchase: PurchaseService):
+    vendor = await masters.create_contact("Dye House", "Sub vendor")
+    item = await masters.create_item(None, "Grey Fabric", item_type="RM")
+    await db.flush()
+    with pytest.raises(ValueError, match="Raw Material Vendor"):
+        await purchase.receive_direct_grn(vendor.contact_id, [
+            GRNLine(item_id=item.item_id, received_qty=5, rate=Decimal("1"), po_number="X"),
+        ])
+
+
+async def test_voucher_number_is_stored_on_the_po(db: AsyncSession, masters: MasterService,
+                                                  purchase: PurchaseService):
+    contact = await masters.create_contact("V", "Raw Material Vendor")
+    item = await masters.create_item(None, "RM", item_type="RM")
+    await db.flush()
+    po = await purchase.create_po(contact.contact_id, [PurchaseLine(item.item_id, 10, Decimal("5"))],
+                                  voucher_number=" GSS-77 ")
+    assert po.voucher_number == "GSS-77"
+
+
+async def test_short_quantity_closes_the_po_without_adding_stock(db: AsyncSession,
+                                                                 masters: MasterService,
+                                                                 purchase: PurchaseService):
+    contact = await masters.create_contact("V", "Raw Material Vendor")
+    item = await masters.create_item(None, "RM", item_type="RM")
+    await db.flush()
+    po = await purchase.create_po(contact.contact_id, [PurchaseLine(item.item_id, 10, Decimal("5"))])
+    await purchase.receive_grn(po.po_id, [
+        GRNLine(item_id=item.item_id, received_qty=7, damaged_qty=1, rate=Decimal("5"), short_qty=2),
+    ])
+    assert await InventoryService(db).current_stock(item.item_id) == 7
+    assert await purchase.pending_po_qty(po.po_id) == 0
+    assert po.status == "CLOSED"

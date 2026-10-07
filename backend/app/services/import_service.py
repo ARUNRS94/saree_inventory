@@ -39,14 +39,15 @@ class EntitySpec:
 
 ENTITY_SPECS: dict[str, EntitySpec] = {
     "items": EntitySpec(
-        columns=["code", "name", "type", "remarks", "color"],
+        columns=["code", "name", "type", "category", "remarks"],
         field_map={
             "code": "item_code", "name": "item_name", "type": "item_type",
-            "remarks": "remarks", "color": "color",
+            "category": "category", "remarks": "remarks",
         },
-        required=["code", "name"],
-        key="code",
-        sample=["RM001", "Cotton Grey Fabric", "Raw Material", "Plain weave", "White"],
+        # Codes are generated, so a blank code column is normal; names identify a row.
+        required=["name"],
+        key="name",
+        sample=["", "Cotton Grey Fabric", "Raw Material", "", "Plain weave"],
         aliases={
             "item_code": "code", "item_name": "name", "item_type": "type",
             "saree_code": "code", "saree_name": "name", "fabric": "type", "design_name": "remarks",
@@ -145,7 +146,7 @@ class ImportService:
 
     async def _existing_keys(self, entity: str) -> set[str]:
         column = {
-            "items": Item.item_code,
+            "items": Item.item_name,
             "contacts": Contact.contact_name,
             "vendors": Vendor.vendor_name,
             "process-types": VendorProcessType.process_type,
@@ -160,8 +161,8 @@ class ImportService:
             if item_type is None:
                 raise ValueError(f"type must be one of: {', '.join(ITEM_TYPE_LABELS.values())}")
             await self.master.create_item(
-                row["code"], row["name"], item_type=item_type,
-                remarks=row.get("remarks") or None, color=row.get("color") or None,
+                row.get("code"), row["name"], item_type=item_type,
+                category=row.get("category") or None, remarks=row.get("remarks") or None,
             )
         elif entity == "contacts":
             await self.master.create_contact(

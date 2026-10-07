@@ -70,16 +70,55 @@ async def test_item_defaults_to_finished_goods(masters: MasterService):
     assert item.item_type == "FG"
 
 
-@pytest.mark.parametrize("code,name", [("", "Name"), ("   ", "Name"), ("C1", ""), ("C1", "  ")])
-async def test_item_requires_code_and_name(masters: MasterService, code, name):
+@pytest.mark.parametrize("code,name", [("C1", ""), ("C1", "  ")])
+async def test_item_requires_name(masters: MasterService, code, name):
     with pytest.raises(ValueError, match="required"):
         await masters.create_item(code, name, item_type="RM")
+
+
+@pytest.mark.parametrize("code", ["", "   ", None])
+async def test_item_code_is_generated_when_blank(masters: MasterService, code):
+    item = await masters.create_item(code, "Grey Fabric", item_type="RM")
+    assert item.item_code == "RM-0001"
+
+
+async def test_generated_item_codes_run_per_type(masters: MasterService):
+    first = await masters.create_item(None, "Grey", item_type="RM")
+    second = await masters.create_item(None, "Dyed", item_type="RM")
+    sub = await masters.create_item(None, "Dyeing", item_type="Sub process", category="Dying")
+    assert [first.item_code, second.item_code, sub.item_code] == ["RM-0001", "RM-0002", "SP-0001"]
+    assert sub.category == "Dying"
+
+
+async def test_category_is_cleared_for_non_sub_process_items(masters: MasterService):
+    item = await masters.create_item(None, "Saree", item_type="FG", category="Dying")
+    assert item.category is None
+
+
+async def test_invalid_sub_process_category_is_rejected(masters: MasterService):
+    with pytest.raises(ValueError, match="Category must be one of"):
+        await masters.create_item(None, "Bad", item_type="Sub process", category="Weaving")
 
 
 async def test_item_type_must_be_a_stored_code_not_a_label(masters: MasterService):
     """create_item takes the stored code; labels must be normalised by the caller."""
     with pytest.raises(ValueError, match="valid item type"):
         await masters.create_item("X2", "Bad", item_type="Raw Material")
+
+
+async def test_duplicate_supplied_code_is_a_clean_error(masters: MasterService, db: AsyncSession):
+    await masters.create_item("RM-01", "First", item_type="RM")
+    await db.flush()
+    with pytest.raises(ValueError, match="already exists"):
+        await masters.create_item("rm-01", "Second", item_type="RM")
+
+
+async def test_generated_code_skips_one_already_taken(masters: MasterService, db: AsyncSession):
+    """A concurrent writer can take the number this request just read."""
+    await masters.create_item("RM-0001", "Taken by someone else", item_type="RM")
+    await db.flush()
+    item = await masters.create_item(None, "Mine", item_type="RM")
+    assert item.item_code == "RM-0002"
 
 
 async def test_update_item_ignores_none_and_uppercases_code(masters: MasterService, db: AsyncSession):

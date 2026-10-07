@@ -10,7 +10,7 @@ import { useConfirmDialog } from '@/components/ConfirmDialog';
 import { Modal, DetailField } from '@/components/Modal';
 import { formatDate, formatCurrency, sumBy } from '@/utils/format';
 import { itemTypeLabel } from '@/utils/itemTypes';
-import { CUSTOMER, SUB_VENDOR } from '@/utils/contactTypes';
+import { SUB_VENDOR } from '@/utils/contactTypes';
 
 type POLineForm = {
   item_id: string;
@@ -37,7 +37,7 @@ export default function PurchaseOrdersPage() {
   const [items, setItems] = useState<Item[]>([]);
   const [allItems, setAllItems] = useState<Item[]>([]);
   // Numeric fields are held as strings so the box can be cleared instead of snapping back to 0.
-  const [form, setForm] = useState({ contact_id: '', remarks: '' });
+  const [form, setForm] = useState({ contact_id: '', voucher_number: '', remarks: '' });
   const [draft, setDraft] = useState<POLineForm>(emptyLine());
   const [lines, setLines] = useState<POLineForm[]>([]);
   const [saving, setSaving] = useState(false);
@@ -57,34 +57,31 @@ export default function PurchaseOrdersPage() {
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
-    api.get('/contacts', { params: { page_size: 200 } }).then((r) => setContacts(r.data.items.filter((s: Contact) => s.contact_type !== CUSTOMER)));
+    // Vouchers are raised against sub vendors only; raw material comes in through a direct GRN.
+    api.get('/contacts', { params: { page_size: 200, contact_type: SUB_VENDOR } }).then((r) => setContacts(r.data.items));
     api.get('/items', { params: { page_size: 500 } }).then((r) => setAllItems(r.data.items));
   }, []);
 
-  const selectedContact = contacts.find((s) => s.contact_id === Number(form.contact_id));
-  const isSubVendor = selectedContact?.contact_type === SUB_VENDOR;
-
   useEffect(() => {
-    const itemType = isSubVendor ? 'Sub process' : 'RM';
-    setItems(allItems.filter((s) => s.item_type === itemType));
-  }, [form.contact_id, allItems, isSubVendor]);
+    setItems(allItems.filter((s) => s.item_type === 'Sub process'));
+  }, [allItems]);
 
-  const openNew = () => { setForm({ contact_id: '', remarks: '' }); setDraft(emptyLine()); setLines([]); setShowForm(true); setError(''); };
+  const openNew = () => { setForm({ contact_id: '', voucher_number: '', remarks: '' }); setDraft(emptyLine()); setLines([]); setShowForm(true); setError(''); };
 
   const itemLabel = (id: string) => {
     const match = allItems.find((s) => s.item_id === Number(id));
-    return match ? `${match.item_code} - ${match.item_name}` : '-';
+    return match ? match.item_name : '-';
   };
 
   const draftError = () => {
-    if (!form.contact_id) return 'Select the vendor before adding items.';
+    if (!form.contact_id) return 'Select the sub vendor before adding items.';
     if (!draft.item_id) return 'Select a stock in item.';
     if (Number(draft.quantity) <= 0) return 'Quantity must be greater than zero.';
-    if (draft.rate === '' || Number(draft.rate) < 0) return 'Enter a rate of zero or more.';
-    if (isSubVendor && !draft.stock_out_item_id) return 'Select the stock out item.';
-    if (isSubVendor && !draft.target_fg_item_id) return 'Select the target FG item.';
+    if (draft.rate !== '' && Number(draft.rate) < 0) return 'Rate / process charges cannot be negative.';
+    if (!draft.stock_out_item_id) return 'Select the stock out item.';
+    if (!draft.target_fg_item_id) return 'Select the target FG item.';
     const duplicate = lines.some((line) => line.item_id === draft.item_id && line.lr_number === draft.lr_number);
-    if (duplicate) return 'That item is already on this PO with the same LR number.';
+    if (duplicate) return 'That item is already on this voucher with the same LR number.';
     return '';
   };
 
@@ -104,34 +101,36 @@ export default function PurchaseOrdersPage() {
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (lines.length === 0) { setError('Add at least one item to the PO.'); return; }
-    if (!(await confirm('Create Purchase Order', `Create this purchase order with ${lines.length} item(s) and post stock movements?`))) return;
+    if (!form.voucher_number.trim()) { setError('Enter the GSS Voucher No.'); return; }
+    if (lines.length === 0) { setError('Add at least one item to the voucher.'); return; }
+    if (!(await confirm('Create Voucher', `Create this voucher with ${lines.length} item(s) and post stock movements?`))) return;
     setSaving(true); setError(''); setSuccess('');
     try {
       const body = {
         contact_id: Number(form.contact_id),
+        voucher_number: form.voucher_number.trim(),
         remarks: form.remarks || null,
         items: lines.map((line) => ({
           item_id: Number(line.item_id),
           quantity: Number(line.quantity),
-          rate: Number(line.rate),
-          stock_out_item_id: isSubVendor && line.stock_out_item_id ? Number(line.stock_out_item_id) : null,
-          target_fg_item_id: isSubVendor && line.target_fg_item_id ? Number(line.target_fg_item_id) : null,
+          rate: Number(line.rate || 0),
+          stock_out_item_id: line.stock_out_item_id ? Number(line.stock_out_item_id) : null,
+          target_fg_item_id: line.target_fg_item_id ? Number(line.target_fg_item_id) : null,
           lr_number: line.lr_number || null,
         })),
       };
       const res = await api.post('/purchase-orders', body);
-      setSuccess(`Purchase Order ${res.data.po_number} created.`);
+      setSuccess(`Voucher ${res.data.voucher_number ?? res.data.po_number} created.`);
       setShowForm(false); load();
     } catch (err: unknown) { setError((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed'); }
     finally { setSaving(false); }
   };
 
   const cancelPO = async (po: PurchaseOrder) => {
-    if (!(await confirm('Cancel Purchase Order', `Cancel ${po.po_number} and reverse any Sub vendor WIP/stock issue movements?`, true))) return;
+    if (!(await confirm('Cancel Voucher', `Cancel ${po.voucher_number ?? po.po_number} and reverse any Sub vendor WIP/stock issue movements?`, true))) return;
     try {
       await api.post(`/purchase-orders/${po.po_id}/cancel`);
-      setSuccess(`PO ${po.po_number} cancelled.`); load();
+      setSuccess(`Voucher ${po.voucher_number ?? po.po_number} cancelled.`); load();
     } catch (err: unknown) { setError((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed'); }
   };
 
@@ -141,22 +140,26 @@ export default function PurchaseOrdersPage() {
   return (
     <div>
       {dialog}
-      <PageHeader title="Purchase Orders" actions={<button className="btn-primary text-sm" onClick={openNew}>+ Create PO</button>} />
+      <PageHeader title="Voucher" actions={<button className="btn-primary text-sm" onClick={openNew}>+ Create Voucher</button>} />
       {success && <div className="bg-green-50 text-green-700 text-sm px-4 py-2 rounded-lg mb-4">{success}</div>}
       {error && <div className="bg-red-50 text-red-700 text-sm px-4 py-2 rounded-lg mb-4">{error}</div>}
 
       {showForm && (
         <div className="card p-4 sm:p-6 mb-6">
-          <h3 className="font-semibold mb-4">New Purchase Order</h3>
+          <h3 className="font-semibold mb-4">New Voucher</h3>
           <form onSubmit={save}>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              <div><label className="label">Raw Material / Sub Vendor *</label>
+              <div><label className="label">GSS Voucher No *</label>
+                <input className="input" maxLength={50} value={form.voucher_number}
+                  onChange={(e) => setForm({ ...form, voucher_number: e.target.value })} required />
+              </div>
+              <div><label className="label">Sub Vendor *</label>
                 <select className="input" value={form.contact_id} onChange={(e) => { setForm({ ...form, contact_id: e.target.value }); setDraft(emptyLine()); setLines([]); }} required>
                   <option value="">Select</option>
-                  {contacts.map((s) => <option key={s.contact_id} value={s.contact_id}>{s.contact_name} ({s.contact_type})</option>)}
+                  {contacts.map((s) => <option key={s.contact_id} value={s.contact_id}>{s.contact_name}</option>)}
                 </select>
               </div>
-              <div className="sm:col-span-1 lg:col-span-2"><label className="label">Remarks (applies to whole PO)</label>
+              <div><label className="label">Remarks (applies to whole voucher)</label>
                 <input className="input" value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })} />
               </div>
             </div>
@@ -167,27 +170,23 @@ export default function PurchaseOrdersPage() {
                 <div><label className="label">Stock In Item *</label>
                   <select className="input" value={draft.item_id} onChange={(e) => setDraft({ ...draft, item_id: e.target.value })}>
                     <option value="">Select</option>
-                    {items.map((s) => <option key={s.item_id} value={s.item_id}>{s.item_code} - {s.item_name}</option>)}
+                    {items.map((s) => <option key={s.item_id} value={s.item_id}>{s.item_name}{s.category ? ` (${s.category})` : ''}</option>)}
                   </select>
                 </div>
-                {isSubVendor && (
-                  <>
-                    <div><label className="label">Stock Out Item (RM/FG) *</label>
-                      <select className="input" value={draft.stock_out_item_id} onChange={(e) => setDraft({ ...draft, stock_out_item_id: e.target.value })}>
-                        <option value="">Select</option>
-                        {rmfgItems.map((s) => <option key={s.item_id} value={s.item_id}>{s.item_code} - {s.item_name} ({itemTypeLabel(s.item_type)})</option>)}
-                      </select>
-                    </div>
-                    <div><label className="label">Target FG Item (For GRN) *</label>
-                      <select className="input" value={draft.target_fg_item_id} onChange={(e) => setDraft({ ...draft, target_fg_item_id: e.target.value })}>
-                        <option value="">Select</option>
-                        {fgItems.map((s) => <option key={s.item_id} value={s.item_id}>{s.item_code} - {s.item_name}</option>)}
-                      </select>
-                    </div>
-                  </>
-                )}
+                <div><label className="label">Stock Out Item (RM/FG) *</label>
+                  <select className="input" value={draft.stock_out_item_id} onChange={(e) => setDraft({ ...draft, stock_out_item_id: e.target.value })}>
+                    <option value="">Select</option>
+                    {rmfgItems.map((s) => <option key={s.item_id} value={s.item_id}>{s.item_name} ({itemTypeLabel(s.item_type)})</option>)}
+                  </select>
+                </div>
+                <div><label className="label">Target FG Item (For GRN) *</label>
+                  <select className="input" value={draft.target_fg_item_id} onChange={(e) => setDraft({ ...draft, target_fg_item_id: e.target.value })}>
+                    <option value="">Select</option>
+                    {fgItems.map((s) => <option key={s.item_id} value={s.item_id}>{s.item_name}</option>)}
+                  </select>
+                </div>
                 <div><label className="label">Quantity *</label><input className="input" type="number" min={1} value={draft.quantity} onChange={(e) => setDraft({ ...draft, quantity: e.target.value })} /></div>
-                <div><label className="label">Rate / Process Charges *</label><input className="input" type="number" min={0} step={0.01} value={draft.rate} onChange={(e) => setDraft({ ...draft, rate: e.target.value })} /></div>
+                <div><label className="label">Rate / Process Charges</label><input className="input" type="number" min={0} step={0.01} value={draft.rate} onChange={(e) => setDraft({ ...draft, rate: e.target.value })} /></div>
                 <div><label className="label">LR Number</label><input className="input" maxLength={50} value={draft.lr_number} onChange={(e) => setDraft({ ...draft, lr_number: e.target.value })} /></div>
                 <div><label className="label">Amount</label><p className="input bg-gray-50">{formatCurrency(lineAmount(draft))}</p></div>
                 <div className="flex items-end">
@@ -197,7 +196,7 @@ export default function PurchaseOrdersPage() {
             </div>
 
             <div className="mt-6">
-              <h4 className="font-medium text-sm mb-2">Items on this PO ({lines.length})</h4>
+              <h4 className="font-medium text-sm mb-2">Items on this voucher ({lines.length})</h4>
               {lines.length === 0 ? (
                 <p className="text-sm text-gray-500 border border-dashed border-gray-300 rounded-lg px-3 py-6 text-center">
                   No items yet. Fill the fields above and choose "Add to List".
@@ -209,8 +208,8 @@ export default function PurchaseOrdersPage() {
                       <tr>
                         <th className="px-3 py-2 text-left font-medium">#</th>
                         <th className="px-3 py-2 text-left font-medium">Stock In Item</th>
-                        {isSubVendor && <th className="px-3 py-2 text-left font-medium">Stock Out</th>}
-                        {isSubVendor && <th className="px-3 py-2 text-left font-medium">Target FG</th>}
+                        <th className="px-3 py-2 text-left font-medium">Stock Out</th>
+                        <th className="px-3 py-2 text-left font-medium">Target FG</th>
                         <th className="px-3 py-2 text-right font-medium">Qty</th>
                         <th className="px-3 py-2 text-right font-medium">Rate</th>
                         <th className="px-3 py-2 text-left font-medium">LR No</th>
@@ -223,10 +222,10 @@ export default function PurchaseOrdersPage() {
                         <tr key={index}>
                           <td className="px-3 py-2 text-gray-500">{index + 1}</td>
                           <td className="px-3 py-2">{itemLabel(line.item_id)}</td>
-                          {isSubVendor && <td className="px-3 py-2">{itemLabel(line.stock_out_item_id)}</td>}
-                          {isSubVendor && <td className="px-3 py-2">{itemLabel(line.target_fg_item_id)}</td>}
+                          <td className="px-3 py-2">{itemLabel(line.stock_out_item_id)}</td>
+                          <td className="px-3 py-2">{itemLabel(line.target_fg_item_id)}</td>
                           <td className="px-3 py-2 text-right">{line.quantity}</td>
-                          <td className="px-3 py-2 text-right">{formatCurrency(line.rate)}</td>
+                          <td className="px-3 py-2 text-right">{formatCurrency(line.rate || 0)}</td>
                           <td className="px-3 py-2">{line.lr_number || '-'}</td>
                           <td className="px-3 py-2 text-right font-medium">{formatCurrency(lineAmount(line))}</td>
                           <td className="px-3 py-2 text-right">
@@ -243,7 +242,7 @@ export default function PurchaseOrdersPage() {
             <div className="mt-4 flex flex-wrap items-center gap-4">
               <span className="text-sm font-medium">Total: {formatCurrency(totalAmount)}</span>
               <div className="flex gap-2">
-                <button type="submit" className="btn-primary text-sm" disabled={saving || lines.length === 0}>{saving ? 'Creating...' : 'Create PO'}</button>
+                <button type="submit" className="btn-primary text-sm" disabled={saving || lines.length === 0}>{saving ? 'Creating...' : 'Create Voucher'}</button>
                 <button type="button" className="btn-secondary text-sm" onClick={() => setShowForm(false)}>Cancel</button>
               </div>
             </div>
@@ -254,12 +253,12 @@ export default function PurchaseOrdersPage() {
       <div className="card">
         <div className="p-4 border-b border-gray-100">
           <FilterBar
-            search={{ value: search, onChange: (v) => { setSearch(v); setPage(1); }, placeholder: 'Search PO number, contact...' }}
+            search={{ value: search, onChange: (v) => { setSearch(v); setPage(1); }, placeholder: 'Search voucher number, sub vendor...' }}
             filters={[
               { label: 'Status', value: filterStatus, onChange: (v) => { setFilterStatus(v); setPage(1); },
                 options: [{ value: '', label: 'All' }, { value: 'OPEN', label: 'Open' }, { value: 'PARTIAL', label: 'Partial' }, { value: 'CLOSED', label: 'Closed' }, { value: 'CANCELLED', label: 'Cancelled' }] },
-              { label: 'Contact', value: filterContact, onChange: (v) => { setfilterContact(v); setPage(1); },
-                options: [{ value: '', label: 'All Contacts' }, ...contacts.map((s) => ({ value: String(s.contact_id), label: s.contact_name }))] },
+              { label: 'Sub Vendor', value: filterContact, onChange: (v) => { setfilterContact(v); setPage(1); },
+                options: [{ value: '', label: 'All Sub Vendors' }, ...contacts.map((s) => ({ value: String(s.contact_id), label: s.contact_name }))] },
             ]}
             dateRange={{ from: dateFrom, to: dateTo, onFromChange: (v) => { setDateFrom(v); setPage(1); }, onToChange: (v) => { setDateTo(v); setPage(1); } }}
             onClear={() => { setSearch(''); setFilterStatus(''); setfilterContact(''); setDateFrom(''); setDateTo(''); setPage(1); }}
@@ -268,11 +267,11 @@ export default function PurchaseOrdersPage() {
         {loading ? <LoadingState /> : data.items.length === 0 ? <EmptyState /> : (
           <>
             <DataTable keyField="po_id" data={data.items} onRowClick={setDetail} columns={[
-              { header: 'PO No', accessor: 'po_number' },
-              { header: 'Contact', accessor: 'contact_name' },
-              { header: 'Type', accessor: 'contact_type', hideOnMobile: true },
+              { header: 'GSS Voucher No', accessor: (r) => r.voucher_number || '-' },
+              { header: 'Sub Vendor', accessor: 'contact_name' },
+              { header: 'Ref No', accessor: 'po_number', hideOnMobile: true },
               { header: 'Date', accessor: (r) => formatDate(r.po_date) },
-              { header: 'Items', accessor: (r) => r.items.map((i) => i.item_code).join(', '), hideOnMobile: true },
+              { header: 'Items', accessor: (r) => r.items.map((i) => i.item_name).join(', '), hideOnMobile: true },
               { header: 'LR No', accessor: (r) => r.items.map((i) => i.lr_number).filter(Boolean).join(', ') || '-', hideOnMobile: true },
               { header: 'Qty', accessor: (r) => sumBy(r.items, (i) => i.ordered_qty) },
               { header: 'Amount', accessor: (r) => formatCurrency(sumBy(r.items, (i) => i.amount)), hideOnMobile: true },
@@ -293,15 +292,15 @@ export default function PurchaseOrdersPage() {
 
       <Modal
         open={!!detail}
-        title={detail ? `Purchase Order ${detail.po_number}` : ''}
+        title={detail ? `Voucher ${detail.voucher_number ?? detail.po_number}` : ''}
         subtitle={detail ? `${detail.contact_name ?? '-'} (${detail.contact_type ?? '-'})` : undefined}
         onClose={() => setDetail(null)}
       >
         {detail && (
           <>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
-              <DetailField label="PO Date" value={formatDate(detail.po_date)} />
-              <DetailField label="Expected Date" value={formatDate(detail.expected_date)} />
+              <DetailField label="Voucher Date" value={formatDate(detail.po_date)} />
+              <DetailField label="Reference No" value={detail.po_number} />
               <DetailField label="Status" value={<StatusBadge status={detail.status} />} />
               <DetailField label="Total Amount" value={formatCurrency(sumBy(detail.items, (i) => i.amount))} />
               <div className="col-span-2 sm:col-span-4">
@@ -328,9 +327,9 @@ export default function PurchaseOrdersPage() {
                   {detail.items.map((item, index) => (
                     <tr key={item.po_item_id}>
                       <td className="px-3 py-2 text-gray-500">{index + 1}</td>
-                      <td className="px-3 py-2">{item.item_code} - {item.item_name}</td>
+                      <td className="px-3 py-2">{item.item_name}</td>
                       {detail.contact_type === SUB_VENDOR && <td className="px-3 py-2">{item.stock_out_item_code || '-'}</td>}
-                      {detail.contact_type === SUB_VENDOR && <td className="px-3 py-2">{item.target_fg_item_code || '-'}</td>}
+                      {detail.contact_type === SUB_VENDOR && <td className="px-3 py-2">{item.target_fg_item_name || '-'}</td>}
                       <td className="px-3 py-2 text-right">{item.ordered_qty}</td>
                       <td className="px-3 py-2 text-right">{formatCurrency(item.rate)}</td>
                       <td className="px-3 py-2">{item.lr_number || '-'}</td>

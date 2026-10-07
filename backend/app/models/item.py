@@ -16,6 +16,8 @@ class Item(Base):
     item_code: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     item_name: Mapped[str] = mapped_column(String(200), nullable=False)
     item_type: Mapped[str] = mapped_column(String(30), default="FG", server_default="FG", index=True)
+    # Only Sub Process items carry a category (Dying / Finishing).
+    category: Mapped[str | None] = mapped_column(String(50))
     remarks: Mapped[str | None] = mapped_column(String(150))
     color: Mapped[str | None] = mapped_column(String(80))
     created_date: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

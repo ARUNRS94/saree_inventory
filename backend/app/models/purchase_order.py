@@ -14,6 +14,7 @@ class PurchaseOrder(Base):
 
     po_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     po_number: Mapped[str] = mapped_column(String(30), unique=True, nullable=False, index=True)
+    voucher_number: Mapped[str | None] = mapped_column(String(50), index=True)
     contact_id: Mapped[int] = mapped_column(ForeignKey("contacts.contact_id"), nullable=False)
     po_date: Mapped[date] = mapped_column(Date, nullable=False)
     expected_date: Mapped[date | None] = mapped_column(Date)

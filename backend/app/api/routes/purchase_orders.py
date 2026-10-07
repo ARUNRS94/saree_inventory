@@ -34,7 +34,8 @@ def _po_to_response(po) -> PurchaseOrderResponse:
             lr_number=item.lr_number,
         ))
     return PurchaseOrderResponse(
-        po_id=po.po_id, po_number=po.po_number, contact_id=po.contact_id,
+        po_id=po.po_id, po_number=po.po_number, voucher_number=po.voucher_number,
+        contact_id=po.contact_id,
         contact_name=po.contact.contact_name if po.contact else None,
         contact_type=po.contact.contact_type if po.contact else None,
         po_date=po.po_date, expected_date=po.expected_date,
@@ -65,7 +66,7 @@ async def create_po(body: PurchaseOrderCreate, db: AsyncSession = Depends(get_db
             lr_number=item.lr_number,
         ) for item in body.items]
         po = await PurchaseService(db).create_po(
-            body.contact_id, lines, body.po_date, body.expected_date, body.remarks,
+            body.contact_id, lines, body.po_date, body.expected_date, body.remarks, body.voucher_number,
         )
         # Reload with relationships
         from sqlalchemy.orm import selectinload

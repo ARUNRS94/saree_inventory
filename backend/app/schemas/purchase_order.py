@@ -11,7 +11,7 @@ from app.schemas.types import Money
 class PurchaseLineCreate(BaseModel):
     item_id: int
     quantity: int = Field(gt=0)
-    rate: Decimal = Field(ge=0)
+    rate: Decimal = Field(ge=0, default=Decimal("0"))
     stock_out_item_id: int | None = None
     target_fg_item_id: int | None = None
     lr_number: str | None = Field(default=None, max_length=50)
@@ -19,6 +19,7 @@ class PurchaseLineCreate(BaseModel):
 
 class PurchaseOrderCreate(BaseModel):
     contact_id: int
+    voucher_number: str = Field(min_length=1, max_length=50)
     po_date: date | None = None
     expected_date: date | None = None
     remarks: str | None = None
@@ -51,6 +52,7 @@ class POItemResponse(BaseModel):
 class PurchaseOrderResponse(BaseModel):
     po_id: int
     po_number: str
+    voucher_number: str | None = None
     contact_id: int
     contact_name: str | None = None
     contact_type: str | None = None

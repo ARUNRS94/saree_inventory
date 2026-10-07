@@ -8,7 +8,9 @@ import { LoadingState, EmptyState } from '@/components/LoadingState';
 import { ImportDialog } from '@/components/ImportDialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { downloadFile } from '@/utils/download';
-import { ITEM_TYPE_OPTIONS, itemTypeLabel } from '@/utils/itemTypes';
+import { ITEM_TYPE_OPTIONS, SUB_PROCESS, SUB_PROCESS_CATEGORY_OPTIONS, itemTypeLabel } from '@/utils/itemTypes';
+
+const emptyForm = { item_name: '', item_type: 'FG', category: '', remarks: '' };
 
 export default function ItemsPage() {
   const { can } = useAuth();
@@ -17,11 +19,11 @@ export default function ItemsPage() {
   const [search, setSearch] = useState('');
   const [itemType, setItemType] = useState('');
   const [page, setPage] = useState(1);
-  const [sort, setSort] = useState<SortState>({ sort_by: 'item_code', sort_dir: 'asc' });
+  const [sort, setSort] = useState<SortState>({ sort_by: 'item_name', sort_dir: 'asc' });
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Item | null>(null);
-  const [form, setForm] = useState({ item_code: '', item_name: '', item_type: 'FG', remarks: '', color: '' });
+  const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -35,19 +37,26 @@ export default function ItemsPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  const openNew = () => { setEditing(null); setForm({ item_code: '', item_name: '', item_type: 'FG', remarks: '', color: '' }); setShowForm(true); setError(''); };
-  const openEdit = (s: Item) => { setEditing(s); setForm({ item_code: s.item_code, item_name: s.item_name, item_type: s.item_type || 'FG', remarks: s.remarks || '', color: s.color || '' }); setShowForm(true); setError(''); };
+  const isSubProcess = form.item_type === SUB_PROCESS;
+
+  const openNew = () => { setEditing(null); setForm(emptyForm); setShowForm(true); setError(''); };
+  const openEdit = (s: Item) => {
+    setEditing(s);
+    setForm({ item_name: s.item_name, item_type: s.item_type || 'FG', category: s.category || '', remarks: s.remarks || '' });
+    setShowForm(true); setError('');
+  };
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true); setError(''); setSuccess('');
+    const body = { ...form, category: isSubProcess ? form.category || null : null };
     try {
       if (editing) {
-        await api.put(`/items/${editing.item_id}`, form);
+        await api.put(`/items/${editing.item_id}`, body);
         setSuccess('Item updated successfully.');
       } else {
-        await api.post('/items', form);
-        setSuccess('Item added successfully.');
+        const res = await api.post('/items', body);
+        setSuccess(`Item ${res.data.item_code} added successfully.`);
       }
       setShowForm(false); load();
     } catch (err: unknown) {
@@ -83,15 +92,21 @@ export default function ItemsPage() {
           <h3 className="font-semibold mb-4">{editing ? 'Edit Item' : 'New Item'}</h3>
           {error && <div className="bg-red-50 text-red-700 text-sm px-4 py-2 rounded-lg mb-4">{error}</div>}
           <form onSubmit={save} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            <div><label className="label">Code *</label><input className="input" value={form.item_code} onChange={(e) => setForm({ ...form, item_code: e.target.value })} required /></div>
-            <div><label className="label">Name *</label><input className="input" value={form.item_name} onChange={(e) => setForm({ ...form, item_name: e.target.value })} required /></div>
             <div><label className="label">Type *</label>
-              <select className="input" value={form.item_type} onChange={(e) => setForm({ ...form, item_type: e.target.value })}>
+              <select className="input" value={form.item_type} onChange={(e) => setForm({ ...form, item_type: e.target.value, category: '' })}>
                 {ITEM_TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </div>
+            {isSubProcess && (
+              <div><label className="label">Category *</label>
+                <select className="input" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} required>
+                  <option value="">Select</option>
+                  {SUB_PROCESS_CATEGORY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </div>
+            )}
+            <div><label className="label">Name *</label><input className="input" value={form.item_name} onChange={(e) => setForm({ ...form, item_name: e.target.value })} required /></div>
             <div><label className="label">Remarks</label><input className="input" value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })} /></div>
-            <div><label className="label">Color</label><input className="input" value={form.color} onChange={(e) => setForm({ ...form, color: e.target.value })} /></div>
             <div className="sm:col-span-2 lg:col-span-3 flex gap-2">
               <button type="submit" className="btn-primary text-sm" disabled={saving}>{saving ? 'Saving...' : 'Save'}</button>
               <button type="button" className="btn-secondary text-sm" onClick={() => setShowForm(false)}>Cancel</button>
@@ -103,7 +118,7 @@ export default function ItemsPage() {
       <div className="card">
         <div className="p-4 border-b border-gray-100">
           <FilterBar
-            search={{ value: search, onChange: (v) => { setSearch(v); setPage(1); }, placeholder: 'Search code, name, remarks, color...' }}
+            search={{ value: search, onChange: (v) => { setSearch(v); setPage(1); }, placeholder: 'Search name, type, category, remarks...' }}
             filters={[{
               label: 'Type', value: itemType, onChange: (v) => { setItemType(v); setPage(1); },
               options: [{ value: '', label: 'All Types' }, ...ITEM_TYPE_OPTIONS],
@@ -120,11 +135,10 @@ export default function ItemsPage() {
               sort={sort}
               onSortChange={(s) => { setSort(s); setPage(1); }}
               columns={[
-                { header: 'Code', accessor: 'item_code', sortKey: 'item_code' },
-                { header: 'Name', accessor: 'item_name', sortKey: 'item_name' },
                 { header: 'Type', accessor: (s) => itemTypeLabel(s.item_type), sortKey: 'item_type' },
+                { header: 'Category', accessor: (s) => s.category || '-', sortKey: 'category' },
+                { header: 'Name', accessor: 'item_name', sortKey: 'item_name' },
                 { header: 'Remarks', accessor: 'remarks', hideOnMobile: true, sortKey: 'remarks' },
-                { header: 'Color', accessor: 'color', hideOnMobile: true, sortKey: 'color' },
               ]}
             />
             <Pagination page={page} total={data.total} pageSize={data.page_size} onChange={setPage} />

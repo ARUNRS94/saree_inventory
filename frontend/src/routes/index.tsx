@@ -37,7 +37,8 @@ export function AppRoutes() {
           <Route path="items" element={<ItemsPage />} />
           <Route path="contacts" element={<ContactsPage />} />
           <Route path="vendors" element={<VendorsPage />} />
-          <Route path="purchase-orders" element={<PurchaseOrdersPage />} />
+          <Route path="vouchers" element={<PurchaseOrdersPage />} />
+          <Route path="purchase-orders" element={<Navigate to="/vouchers" replace />} />
           <Route path="grn" element={<GRNPage />} />
           <Route path="customer-issue" element={<CustomerIssuePage />} />
           {/* Vendors and Job Work stay routable by URL but are not in the nav. */}

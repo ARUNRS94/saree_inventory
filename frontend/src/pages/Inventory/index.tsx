@@ -18,6 +18,8 @@ export default function InventoryPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [stockType, setStockType] = useState('');
+  const [vendor, setVendor] = useState('');
+  const [vendorOptions, setVendorOptions] = useState<string[]>([]);
   const [txnType, setTxnType] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -25,7 +27,9 @@ export default function InventoryPage() {
   const load = useCallback(() => {
     setLoading(true);
     if (tab === 'stock') {
-      api.get('/inventory/stock').then((r) => setStock(r.data)).finally(() => setLoading(false));
+      api.get('/inventory/stock', { params: {
+        search: search || undefined, item_type: stockType || undefined, vendor: vendor || undefined,
+      } }).then((r) => setStock(r.data)).finally(() => setLoading(false));
     } else {
       api.get('/inventory/ledger', { params: {
         page, page_size: 50, search: search || undefined,
@@ -33,15 +37,14 @@ export default function InventoryPage() {
         date_from: dateFrom || undefined, date_to: dateTo || undefined,
       } }).then((r) => setLedger(r.data)).finally(() => setLoading(false));
     }
-  }, [tab, page, search, txnType, dateFrom, dateTo]);
+  }, [tab, page, search, stockType, vendor, txnType, dateFrom, dateTo]);
 
   useEffect(() => { load(); }, [load]);
 
-  const filtered = tab === 'stock' ? stock.filter((s) => {
-    const matchText = !search || `${s.item_code} ${s.item_name}`.toLowerCase().includes(search.toLowerCase());
-    const matchType = !stockType || s.item_type === stockType;
-    return matchText && matchType;
-  }) : [];
+  useEffect(() => {
+    api.get('/contacts', { params: { page_size: 300 } })
+      .then((r) => setVendorOptions(r.data.items.map((c: { contact_name: string }) => c.contact_name).sort()));
+  }, []);
 
   return (
     <div>
@@ -56,12 +59,14 @@ export default function InventoryPage() {
         <div className="p-4 border-b border-gray-100">
           {tab === 'stock' ? (
             <FilterBar
-              search={{ value: search, onChange: setSearch, placeholder: 'Filter by code or name...' }}
-              filters={[{
-                label: 'Type', value: stockType, onChange: setStockType,
-                options: [{ value: '', label: 'All Types' }, ...ITEM_TYPE_OPTIONS],
-              }]}
-              onClear={() => { setSearch(''); setStockType(''); }}
+              search={{ value: search, onChange: setSearch, placeholder: 'Filter by item name or category...' }}
+              filters={[
+                { label: 'Type', value: stockType, onChange: setStockType,
+                  options: [{ value: '', label: 'All Types' }, ...ITEM_TYPE_OPTIONS] },
+                { label: 'Vendor', value: vendor, onChange: setVendor,
+                  options: [{ value: '', label: 'All Vendors' }, ...vendorOptions.map((v) => ({ value: v, label: v }))] },
+              ]}
+              onClear={() => { setSearch(''); setStockType(''); setVendor(''); }}
             />
           ) : (
             <FilterBar
@@ -76,16 +81,17 @@ export default function InventoryPage() {
           )}
         </div>
         {loading ? <LoadingState /> : tab === 'stock' ? (
-          filtered.length === 0 ? <EmptyState /> : (
+          stock.length === 0 ? <EmptyState /> : (
             <>
-              <DataTable keyField="item_id" data={filtered} columns={[
-                { header: 'Code', accessor: 'item_code' },
+              <DataTable keyField="item_id" data={stock} columns={[
                 { header: 'Name', accessor: 'item_name' },
                 { header: 'Type', accessor: (s) => itemTypeLabel(s.item_type) },
+                { header: 'Category', accessor: (s) => s.category || '-', hideOnMobile: true },
+                { header: 'Vendors', accessor: (s) => s.vendors.join(', ') || '-' },
                 { header: 'Stock', accessor: 'current_stock', className: 'font-semibold' },
               ]} />
               <div className="px-4 py-3 border-t border-gray-100 text-right font-semibold">
-                Total: {formatNumber(sumBy(filtered, (s) => s.current_stock))} pcs across {filtered.length} item(s)
+                Total: {formatNumber(sumBy(stock, (s) => s.current_stock))} pcs across {stock.length} item(s)
               </div>
             </>
           )
@@ -94,9 +100,9 @@ export default function InventoryPage() {
             <>
               <DataTable keyField="ledger_id" data={ledger.items} columns={[
                 { header: 'Date', accessor: (r) => formatDate(r.transaction_date) },
-                { header: 'Type', accessor: 'transaction_type' },
+                { header: 'Type', accessor: (r) => r.transaction_type.replace(/_/g, ' ') },
                 { header: 'Reference', accessor: 'reference_no', hideOnMobile: true },
-                { header: 'Item', accessor: (r) => `${r.item_code} - ${r.item_name}` },
+                { header: 'Item', accessor: 'item_name' },
                 { header: 'In', accessor: 'qty_in' },
                 { header: 'Out', accessor: 'qty_out' },
                 { header: 'Rate', accessor: (r) => formatCurrency(r.rate), hideOnMobile: true },

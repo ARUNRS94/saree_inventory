@@ -37,7 +37,7 @@ async def create_item(body: ItemCreate, db: AsyncSession = Depends(get_db), _use
     try:
         item = await MasterService(db).create_item(
             body.item_code, body.item_name,
-            item_type=body.item_type,
+            item_type=body.item_type, category=body.category,
             remarks=body.remarks, color=body.color,
         )
         return ItemResponse.model_validate(item)

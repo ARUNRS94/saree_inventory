@@ -7,7 +7,7 @@ import { useSettings } from '@/contexts/SettingsContext';
 const links = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/inventory', label: 'Inventory', icon: Package },
-  { to: '/purchase-orders', label: 'Purchase', icon: ShoppingCart },
+  { to: '/vouchers', label: 'Voucher', icon: ShoppingCart },
   { to: '/grn', label: 'GRN', icon: ClipboardCheck },
   { to: '/customer-issue', label: 'Customer Issue', icon: Truck },
   { to: '/items', label: 'Items', icon: Layers },

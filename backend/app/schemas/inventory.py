@@ -35,6 +35,8 @@ class StockSummaryResponse(BaseModel):
     item_code: str
     item_name: str
     item_type: str | None
+    category: str | None = None
+    vendors: list[str] = []
     current_stock: int
 
 
@@ -42,6 +44,9 @@ class StockValuationResponse(BaseModel):
     item_id: int
     item_code: str
     item_name: str
+    item_type: str | None = None
+    category: str | None = None
+    vendors: list[str] = []
     current_stock: int
     latest_rate: Money
     value: Money

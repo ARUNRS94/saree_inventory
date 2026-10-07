@@ -7,6 +7,12 @@ export const ITEM_TYPE_LABELS: Record<string, string> = {
 
 export const ITEM_TYPE_OPTIONS = Object.entries(ITEM_TYPE_LABELS).map(([value, label]) => ({ value, label }));
 
+export const SUB_PROCESS = 'Sub process';
+
+/** Sub Process items are split by the work the sub vendor does. */
+export const SUB_PROCESS_CATEGORIES = ['Dying', 'Finishing'];
+export const SUB_PROCESS_CATEGORY_OPTIONS = SUB_PROCESS_CATEGORIES.map((value) => ({ value, label: value }));
+
 export function itemTypeLabel(code: string | null | undefined): string {
   if (!code) return '';
   return ITEM_TYPE_LABELS[code] ?? code;

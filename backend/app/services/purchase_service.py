@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.grn import GRN, GRNItem
+from app.models.grn import GRN, GRN_TYPE_RAW_MATERIAL, GRN_TYPE_SUB_VENDOR, GRNItem
 from app.models.purchase_order import PurchaseOrder, PurchaseOrderItem
 from app.models.item import Item
 from app.models.contact import Contact
@@ -21,7 +21,7 @@ from app.services.numbering import next_number
 class PurchaseLine:
     item_id: int
     quantity: int
-    rate: Decimal
+    rate: Decimal = Decimal("0")
     stock_out_item_id: int | None = None
     target_fg_item_id: int | None = None
     lr_number: str | None = None
@@ -31,9 +31,16 @@ class PurchaseLine:
 class GRNLine:
     item_id: int
     received_qty: int
-    damaged_qty: int
-    rate: Decimal
+    damaged_qty: int = 0
+    rate: Decimal = Decimal("0")
     lr_number: str | None = None
+    short_qty: int = 0
+    po_number: str | None = None
+
+    @property
+    def accounted_qty(self) -> int:
+        """Everything the vendor is answerable for: received, damaged/NC and short."""
+        return self.received_qty + self.damaged_qty + self.short_qty
 
 
 class PurchaseService:
@@ -42,7 +49,8 @@ class PurchaseService:
         self.inventory = InventoryService(session)
 
     async def create_po(self, contact_id: int, lines: list[PurchaseLine], po_date: date | None = None,
-                        expected_date: date | None = None, remarks: str | None = None) -> PurchaseOrder:
+                        expected_date: date | None = None, remarks: str | None = None,
+                        voucher_number: str | None = None) -> PurchaseOrder:
         if not lines:
             raise ValueError("Purchase order requires at least one item line.")
         contact = await self.session.get(Contact, contact_id)
@@ -53,6 +61,7 @@ class PurchaseService:
         document_date = po_date or date.today()
         po = PurchaseOrder(
             po_number=await next_number(self.session, PurchaseOrder, "po_number", "PO", document_date),
+            voucher_number=(voucher_number or "").strip() or None,
             contact_id=contact_id,
             po_date=document_date,
             expected_date=expected_date,
@@ -102,8 +111,50 @@ class PurchaseService:
         await self.session.flush()
         return po
 
+    async def receive_direct_grn(self, contact_id: int | None, lines: list[GRNLine],
+                                 grn_date: date | None = None, remarks: str | None = None) -> GRN:
+        """Raw Material arrives without a voucher, so the GRN is the first document."""
+        if not lines:
+            raise ValueError("GRN requires at least one received line.")
+        contact = await self.session.get(Contact, contact_id) if contact_id else None
+        if contact_id and contact is None:
+            raise ValueError("Contact not found.")
+        if contact is not None and contact.contact_type != RM_VENDOR:
+            raise ValueError("Direct GRNs can be raised only against a Raw Material Vendor.")
+
+        document_date = grn_date or date.today()
+        grn = GRN(
+            grn_number=await next_number(self.session, GRN, "grn_number", "GRN", document_date),
+            grn_type=GRN_TYPE_RAW_MATERIAL,
+            po_id=None,
+            contact_id=contact_id,
+            grn_date=document_date,
+            remarks=remarks,
+        )
+        for line in lines:
+            if line.received_qty <= 0:
+                raise ValueError("Quantity is required on every Raw Material inward item.")
+            if not (line.po_number or "").strip():
+                raise ValueError("PO Number is required on every Raw Material inward item.")
+            item = await self.session.get(Item, line.item_id)
+            if item is None or item.item_type != "RM":
+                raise ValueError("Raw Material GRN stock-in item must be a Raw Material item.")
+            grn.items.append(GRNItem(
+                item_id=line.item_id, received_qty=line.received_qty, damaged_qty=0, short_qty=0,
+                rate=line.rate, lr_number=line.lr_number, po_number=line.po_number.strip(),
+            ))
+            await self.inventory.post_ledger(
+                transaction_date=document_date, transaction_type="PURCHASE",
+                reference_no=grn.grn_number, item_id=line.item_id,
+                qty_in=line.received_qty, rate=line.rate, remarks=remarks,
+            )
+        self.session.add(grn)
+        await self.session.flush()
+        return grn
+
     async def receive_grn(self, po_id: int, lines: list[GRNLine] | list[tuple[int, int, int, Decimal]],
-                          grn_date: date | None = None, remarks: str | None = None) -> GRN:
+                          grn_date: date | None = None, remarks: str | None = None,
+                          vendor_voucher_number: str | None = None) -> GRN:
         po = await self.session.get(PurchaseOrder, po_id, populate_existing=True, options=[selectinload(PurchaseOrder.contact), selectinload(PurchaseOrder.items)])
         if po is None:
             raise ValueError("Purchase order not found.")
@@ -114,8 +165,11 @@ class PurchaseService:
         document_date = grn_date or date.today()
         grn = GRN(
             grn_number=await next_number(self.session, GRN, "grn_number", "GRN", document_date),
+            grn_type=GRN_TYPE_SUB_VENDOR,
             po_id=po_id,
+            contact_id=po.contact_id,
             grn_date=document_date,
+            vendor_voucher_number=(vendor_voucher_number or "").strip() or None,
             remarks=remarks,
         )
         transaction_type = "SUB_VENDOR_GRN" if po.contact.contact_type == SUB_VENDOR else "PURCHASE"
@@ -123,9 +177,9 @@ class PurchaseService:
         claimed: dict[int | None, int] = {}
         for line in receipt_lines:
             item_id, received_qty, damaged_qty, rate = line.item_id, line.received_qty, line.damaged_qty, line.rate
-            total_receipt_qty = received_qty + damaged_qty
-            if received_qty < 0 or damaged_qty < 0 or total_receipt_qty <= 0:
-                raise ValueError("Received or damaged quantity is required.")
+            total_receipt_qty = line.accounted_qty
+            if received_qty < 0 or damaged_qty < 0 or line.short_qty < 0 or total_receipt_qty <= 0:
+                raise ValueError("Received, damaged/NC or short quantity is required.")
             if po.contact.contact_type == SUB_VENDOR:
                 fg_item = await self.session.get(Item, item_id)
                 allowed_fg_ids = {item.target_fg_item_id for item in po.items if item.target_fg_item_id is not None}
@@ -146,7 +200,8 @@ class PurchaseService:
                 raise ValueError(f"Receipt quantity exceeds pending PO quantity. Pending: {pending}.")
             claimed[pending_key] = claimed.get(pending_key, 0) + total_receipt_qty
             grn.items.append(GRNItem(item_id=item_id, received_qty=received_qty, damaged_qty=damaged_qty,
-                                     rate=rate, lr_number=line.lr_number))
+                                     short_qty=line.short_qty, rate=rate, lr_number=line.lr_number,
+                                     po_number=line.po_number or po.po_number))
             if po.contact.contact_type == SUB_VENDOR:
                 await self._consume_wip(po, total_receipt_qty, document_date, grn.grn_number, rate, remarks)
             if received_qty:
@@ -165,17 +220,17 @@ class PurchaseService:
         if item_id is not None:
             stmt = stmt.where(PurchaseOrderItem.item_id == item_id)
         ordered = int(await self.session.scalar(stmt) or 0)
-        if item_id is None:
-            received = int(await self.session.scalar(
-                select(func.coalesce(func.sum(GRNItem.received_qty + GRNItem.damaged_qty), 0))
-                .join(GRN).where(GRN.po_id == po_id)
-            ) or 0)
-        else:
-            received = int(await self.session.scalar(
-                select(func.coalesce(func.sum(GRNItem.received_qty + GRNItem.damaged_qty), 0))
-                .join(GRN).where(GRN.po_id == po_id, GRNItem.item_id == item_id)
-            ) or 0)
+        received = await self._accounted_qty(po_id, item_id)
         return max(ordered - received, 0)
+
+    async def _accounted_qty(self, po_id: int, item_id: int | None = None) -> int:
+        stmt = (
+            select(func.coalesce(func.sum(GRNItem.received_qty + GRNItem.damaged_qty + GRNItem.short_qty), 0))
+            .join(GRN).where(GRN.po_id == po_id)
+        )
+        if item_id is not None:
+            stmt = stmt.where(GRNItem.item_id == item_id)
+        return int(await self.session.scalar(stmt) or 0)
 
     async def _consume_wip(self, po: PurchaseOrder, quantity: int, document_date, reference_no, rate, remarks):
         remaining = quantity
@@ -200,10 +255,7 @@ class PurchaseService:
             raise ValueError("Purchase order not found.")
         if po.status == "CANCELLED":
             raise ValueError("Purchase order is already cancelled.")
-        received = int(await self.session.scalar(
-            select(func.coalesce(func.sum(GRNItem.received_qty + GRNItem.damaged_qty), 0))
-            .join(GRN).where(GRN.po_id == po.po_id)
-        ) or 0)
+        received = await self._accounted_qty(po.po_id)
         if received > 0:
             raise ValueError("Cannot cancel a PO after GRN quantity has been received.")
         document_date = cancel_date or date.today()
@@ -228,10 +280,7 @@ class PurchaseService:
 
     async def _update_po_status(self, po: PurchaseOrder) -> None:
         ordered = sum(item.ordered_qty for item in po.items)
-        received = int(await self.session.scalar(
-            select(func.coalesce(func.sum(GRNItem.received_qty + GRNItem.damaged_qty), 0))
-            .join(GRN).where(GRN.po_id == po.po_id)
-        ) or 0)
+        received = await self._accounted_qty(po.po_id)
         if po.status != "CANCELLED":
             po.status = "CLOSED" if received >= ordered else "PARTIAL" if received > 0 else "OPEN"
 
@@ -253,8 +302,8 @@ class PurchaseService:
             count_stmt = count_stmt.where(PurchaseOrder.contact_id == contact_id)
         if search:
             like = f"%{search}%"
-            stmt = stmt.join(Contact).where(PurchaseOrder.po_number.ilike(like) | Contact.contact_name.ilike(like))
-            count_stmt = count_stmt.join(Contact).where(PurchaseOrder.po_number.ilike(like) | Contact.contact_name.ilike(like))
+            stmt = stmt.join(Contact).where(PurchaseOrder.po_number.ilike(like) | PurchaseOrder.voucher_number.ilike(like) | Contact.contact_name.ilike(like))
+            count_stmt = count_stmt.join(Contact).where(PurchaseOrder.po_number.ilike(like) | PurchaseOrder.voucher_number.ilike(like) | Contact.contact_name.ilike(like))
         if date_from:
             stmt = stmt.where(PurchaseOrder.po_date >= date_from)
             count_stmt = count_stmt.where(PurchaseOrder.po_date >= date_from)
@@ -268,19 +317,24 @@ class PurchaseService:
 
     async def list_grns(self, po_id: int | None = None, search: str = "",
                         date_from: date | None = None, date_to: date | None = None,
-                        page: int = 1, page_size: int = 50) -> tuple[list[GRN], int]:
+                        page: int = 1, page_size: int = 50, grn_type: str | None = None) -> tuple[list[GRN], int]:
         stmt = select(GRN).options(
-            selectinload(GRN.purchase_order),
+            selectinload(GRN.purchase_order).selectinload(PurchaseOrder.contact),
+            selectinload(GRN.contact),
             selectinload(GRN.items).selectinload(GRNItem.item),
         )
         count_stmt = select(func.count()).select_from(GRN)
         if po_id:
             stmt = stmt.where(GRN.po_id == po_id)
             count_stmt = count_stmt.where(GRN.po_id == po_id)
+        if grn_type:
+            stmt = stmt.where(GRN.grn_type == grn_type)
+            count_stmt = count_stmt.where(GRN.grn_type == grn_type)
         if search:
             like = f"%{search}%"
-            stmt = stmt.where(GRN.grn_number.ilike(like))
-            count_stmt = count_stmt.where(GRN.grn_number.ilike(like))
+            text_filter = GRN.grn_number.ilike(like) | GRN.vendor_voucher_number.ilike(like)
+            stmt = stmt.where(text_filter)
+            count_stmt = count_stmt.where(text_filter)
         if date_from:
             stmt = stmt.where(GRN.grn_date >= date_from)
             count_stmt = count_stmt.where(GRN.grn_date >= date_from)

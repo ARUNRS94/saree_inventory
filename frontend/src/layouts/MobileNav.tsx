@@ -6,7 +6,7 @@ import { useState } from 'react';
 const mainLinks = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/inventory', label: 'Inventory', icon: Package },
-  { to: '/purchase-orders', label: 'Purchase', icon: ShoppingCart },
+  { to: '/vouchers', label: 'Voucher', icon: ShoppingCart },
   { to: '/customer-issue', label: 'Cust. Issue', icon: Truck },
 ];
 
