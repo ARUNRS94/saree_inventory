@@ -1,8 +1,16 @@
 from __future__ import annotations
 
+from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
+
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+# Loaded in order, so a backend/.env overrides one left at the repository root.
+ENV_FILES = (BACKEND_ROOT.parent / ".env", BACKEND_ROOT / ".env")
+
+_SQLITE_DEFAULT = "sqlite+aiosqlite:///./dev.db"
 
 # asyncpg takes only a handful of query parameters; libpq options and pooler hints make it raise.
 _ASYNCPG_PARAMS = {"ssl"}
@@ -40,8 +48,16 @@ def _rewrite_pg_url(url: str, driver: str) -> str:
 
 class Settings(BaseSettings):
     APP_NAME: str = "Inventory Management"
-    DATABASE_URL: str = "sqlite+aiosqlite:///./dev.db"
+    DATABASE_URL: str = _SQLITE_DEFAULT
     DATABASE_URL_SYNC: str = ""
+
+    # The Vercel/Supabase integration injects its own names; accepted so the
+    # connection string never has to be copied by hand.
+    SUPABASE_POSTGRES_URL: str = ""
+    SUPABASE_POSTGRES_URL_NON_POOLING: str = ""
+    POSTGRES_URL: str = ""
+    POSTGRES_URL_NON_POOLING: str = ""
+
     SECRET_KEY: str = "change-me"
     JWT_SECRET_KEY: str = "change-me"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
@@ -74,7 +90,24 @@ class Settings(BaseSettings):
     # Comma-separated list of allowed email domains; empty means any domain.
     GOOGLE_ALLOWED_DOMAINS: str = ""
 
-    model_config = {"env_file": ".env", "extra": "ignore"}
+    model_config = {"env_file": ENV_FILES, "extra": "ignore"}
+
+    @model_validator(mode="after")
+    def _adopt_managed_database_urls(self) -> "Settings":
+        """Fall back to the hosting integration's connection strings.
+
+        Only when the caller gave us nothing, so an explicit DATABASE_URL always wins.
+        """
+        if "DATABASE_URL" not in self.model_fields_set:
+            pooled = self.SUPABASE_POSTGRES_URL or self.POSTGRES_URL
+            if pooled:
+                self.DATABASE_URL = pooled
+        if not self.DATABASE_URL_SYNC and not self.is_sqlite:
+            # Migrations need a session-mode endpoint, which is the non-pooling one.
+            direct = self.SUPABASE_POSTGRES_URL_NON_POOLING or self.POSTGRES_URL_NON_POOLING
+            if direct:
+                self.DATABASE_URL_SYNC = direct
+        return self
 
     @property
     def cors_origins_list(self) -> list[str]:

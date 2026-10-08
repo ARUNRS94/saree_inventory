@@ -27,12 +27,14 @@ def run_migrations_offline() -> None:
 def run_migrations_online() -> None:
     connectable = engine_from_config(config.get_section(config.config_ini_section, {}), prefix="sqlalchemy.", poolclass=pool.NullPool)
     with connectable.connect() as connection:
-        # Fail loudly instead of queueing behind a long read when a previous
-        # deployment is still serving traffic against the same database.
-        if connection.dialect.name == "postgresql":
-            connection.execute(text("SET lock_timeout = '30s'"))
         context.configure(connection=connection, target_metadata=target_metadata)
         with context.begin_transaction():
+            # SET LOCAL keeps this inside Alembic's transaction. A plain SET here would
+            # open one of its own first, leaving Alembic's commit a no-op and the whole
+            # upgrade rolled back on close. Fails loudly rather than queueing behind a
+            # long read from a previous deployment.
+            if connection.dialect.name == "postgresql":
+                connection.execute(text("SET LOCAL lock_timeout = '30s'"))
             context.run_migrations()
 
 

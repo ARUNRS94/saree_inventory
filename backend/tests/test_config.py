@@ -31,6 +31,34 @@ def query_of(url: str) -> dict[str, list[str]]:
     return parse_qs(urlsplit(url).query)
 
 
+# --- connection strings supplied by the hosting integration ---
+
+def test_supabase_integration_variables_are_adopted():
+    """The Vercel/Supabase integration injects its own names instead of DATABASE_URL."""
+    settings = make(SUPABASE_POSTGRES_URL=SUPABASE_TXN,
+                    SUPABASE_POSTGRES_URL_NON_POOLING=SUPABASE_SESSION)
+    assert not settings.is_sqlite
+    assert settings.async_database_url.startswith("postgresql+asyncpg://")
+    assert ":6543" in settings.async_database_url
+    # Migrations must not go through the transaction pooler.
+    assert ":5432" in settings.sync_database_url
+
+
+def test_an_explicit_database_url_beats_the_integration():
+    settings = make(DATABASE_URL="sqlite+aiosqlite:///./dev.db", SUPABASE_POSTGRES_URL=SUPABASE_TXN)
+    assert settings.is_sqlite
+
+
+def test_sqlite_never_borrows_the_integration_sync_url():
+    settings = make(DATABASE_URL="sqlite+aiosqlite:///./dev.db",
+                    SUPABASE_POSTGRES_URL_NON_POOLING=SUPABASE_SESSION)
+    assert settings.sync_database_url.startswith("sqlite")
+
+
+def test_unprefixed_postgres_url_is_also_accepted():
+    assert not make(POSTGRES_URL=PLAIN).is_sqlite
+
+
 # --- async (runtime) URL ---
 
 @pytest.mark.parametrize("url", [NEON, SUPABASE_TXN, SUPABASE_SESSION, PRISMA, PLAIN])
