@@ -37,6 +37,8 @@ class StockSummaryResponse(BaseModel):
     item_type: str | None
     category: str | None = None
     vendors: list[str] = []
+    voucher_numbers: list[str] = []
+    vendor_voucher_numbers: list[str] = []
     current_stock: int
 
 
@@ -47,9 +49,16 @@ class StockValuationResponse(BaseModel):
     item_type: str | None = None
     category: str | None = None
     vendors: list[str] = []
+    voucher_numbers: list[str] = []
+    vendor_voucher_numbers: list[str] = []
     current_stock: int
     latest_rate: Money
     value: Money
+
+
+class VoucherOptionsResponse(BaseModel):
+    voucher_numbers: list[str] = []
+    vendor_voucher_numbers: list[str] = []
 
 
 class CustomerIssueCreate(BaseModel):

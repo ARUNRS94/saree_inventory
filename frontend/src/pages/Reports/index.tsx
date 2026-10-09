@@ -30,6 +30,9 @@ export default function ReportsPage() {
   const [itemType, setItemType] = useState('');
   const [vendor, setVendor] = useState('');
   const [vendorOptions, setVendorOptions] = useState<string[]>([]);
+  const [voucherNumber, setVoucherNumber] = useState('');
+  const [vendorVoucherNumber, setVendorVoucherNumber] = useState('');
+  const [voucherOptions, setVoucherOptions] = useState<{ voucher_numbers: string[]; vendor_voucher_numbers: string[] }>({ voucher_numbers: [], vendor_voucher_numbers: [] });
   const [hideZero, setHideZero] = useState(false);
   const [txnType, setTxnType] = useState('');
   const [dateFrom, setDateFrom] = useState('');
@@ -37,12 +40,17 @@ export default function ReportsPage() {
 
   const params = useMemo(() => (tab === 'movement'
     ? { search: search || undefined, transaction_type: txnType || undefined, date_from: dateFrom || undefined, date_to: dateTo || undefined }
-    : { search: search || undefined, item_type: itemType || undefined, vendor: vendor || undefined, hide_zero: hideZero || undefined }
-  ), [tab, search, itemType, vendor, hideZero, txnType, dateFrom, dateTo]);
+    : {
+      search: search || undefined, item_type: itemType || undefined, vendor: vendor || undefined,
+      hide_zero: hideZero || undefined, voucher_number: voucherNumber || undefined,
+      vendor_voucher_number: vendorVoucherNumber || undefined,
+    }
+  ), [tab, search, itemType, vendor, hideZero, voucherNumber, vendorVoucherNumber, txnType, dateFrom, dateTo]);
 
   useEffect(() => {
     api.get('/contacts', { params: { page_size: 300 } })
       .then((r) => setVendorOptions(r.data.items.map((c: { contact_name: string }) => c.contact_name).sort()));
+    api.get('/inventory/vouchers').then((r) => setVoucherOptions(r.data));
   }, []);
 
   useEffect(() => {
@@ -70,6 +78,7 @@ export default function ReportsPage() {
 
   const clearFilters = () => {
     setSearch(''); setItemType(''); setVendor(''); setHideZero(false);
+    setVoucherNumber(''); setVendorVoucherNumber('');
     setTxnType(''); setDateFrom(''); setDateTo('');
   };
 
@@ -127,12 +136,16 @@ export default function ReportsPage() {
           ) : (
             <>
               <FilterBar
-                search={{ value: search, onChange: setSearch, placeholder: 'Search item name or category...' }}
+                search={{ value: search, onChange: setSearch, placeholder: 'Search item name or code...' }}
                 filters={[
                   { label: 'Type', value: itemType, onChange: setItemType,
                     options: [{ value: '', label: 'All Types' }, ...ITEM_TYPE_OPTIONS] },
                   { label: 'Vendor', value: vendor, onChange: setVendor,
                     options: [{ value: '', label: 'All Vendors' }, ...vendorOptions.map((v) => ({ value: v, label: v }))] },
+                  { label: 'GSS Voucher No', value: voucherNumber, onChange: setVoucherNumber,
+                    options: [{ value: '', label: 'All Vouchers' }, ...voucherOptions.voucher_numbers.map((v) => ({ value: v, label: v }))] },
+                  { label: 'Vendor Voucher No', value: vendorVoucherNumber, onChange: setVendorVoucherNumber,
+                    options: [{ value: '', label: 'All Vendor Vouchers' }, ...voucherOptions.vendor_voucher_numbers.map((v) => ({ value: v, label: v }))] },
                 ]}
                 onClear={clearFilters}
               />
@@ -150,7 +163,8 @@ export default function ReportsPage() {
               <DataTable keyField="item_id" data={stock} columns={[
                 { header: 'Name', accessor: 'item_name' },
                 { header: 'Type', accessor: (s) => itemTypeLabel(s.item_type) },
-                { header: 'Category', accessor: (s) => s.category || '-', hideOnMobile: true },
+                { header: 'GSS Voucher No', accessor: (s) => s.voucher_numbers.join(', ') || '-', hideOnMobile: true },
+                { header: 'Vendor Voucher No', accessor: (s) => s.vendor_voucher_numbers.join(', ') || '-', hideOnMobile: true },
                 { header: 'Vendors', accessor: (s) => s.vendors.join(', ') || '-' },
                 { header: 'Stock', accessor: 'current_stock', className: 'font-semibold' },
               ]} />
@@ -165,6 +179,8 @@ export default function ReportsPage() {
               <DataTable keyField="item_id" data={valuation} columns={[
                 { header: 'Name', accessor: 'item_name' },
                 { header: 'Type', accessor: (r) => itemTypeLabel(r.item_type), hideOnMobile: true },
+                { header: 'GSS Voucher No', accessor: (r) => r.voucher_numbers.join(', ') || '-', hideOnMobile: true },
+                { header: 'Vendor Voucher No', accessor: (r) => r.vendor_voucher_numbers.join(', ') || '-', hideOnMobile: true },
                 { header: 'Vendors', accessor: (r) => r.vendors.join(', ') || '-', hideOnMobile: true },
                 { header: 'Stock', accessor: 'current_stock' },
                 { header: 'Rate', accessor: (r) => formatCurrency(r.latest_rate), hideOnMobile: true },

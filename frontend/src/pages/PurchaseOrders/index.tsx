@@ -44,6 +44,7 @@ export default function PurchaseOrdersPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [detail, setDetail] = useState<PurchaseOrder | null>(null);
+  const [stockOutAvailable, setStockOutAvailable] = useState<number | null>(null);
   const { confirm, dialog } = useConfirmDialog();
 
   const load = useCallback(() => {
@@ -66,6 +67,15 @@ export default function PurchaseOrdersPage() {
     setItems(allItems.filter((s) => s.item_type === 'Sub process'));
   }, [allItems]);
 
+  useEffect(() => {
+    if (!draft.stock_out_item_id) { setStockOutAvailable(null); return; }
+    let cancelled = false;
+    api.get(`/inventory/stock/${draft.stock_out_item_id}`)
+      .then((r) => { if (!cancelled) setStockOutAvailable(r.data.current_stock); })
+      .catch(() => { if (!cancelled) setStockOutAvailable(null); });
+    return () => { cancelled = true; };
+  }, [draft.stock_out_item_id]);
+
   const openNew = () => { setForm({ contact_id: '', voucher_number: '', remarks: '' }); setDraft(emptyLine()); setLines([]); setShowForm(true); setError(''); };
 
   const itemLabel = (id: string) => {
@@ -79,6 +89,7 @@ export default function PurchaseOrdersPage() {
     if (Number(draft.quantity) <= 0) return 'Quantity must be greater than zero.';
     if (draft.rate !== '' && Number(draft.rate) < 0) return 'Rate / process charges cannot be negative.';
     if (!draft.stock_out_item_id) return 'Select the stock out item.';
+    if (stockOutRemaining !== null && Number(draft.quantity) > stockOutRemaining) return `Quantity exceeds the available stock (${stockOutRemaining}) for the stock out item.`;
     if (!draft.target_fg_item_id) return 'Select the target FG item.';
     const duplicate = lines.some((line) => line.item_id === draft.item_id && line.lr_number === draft.lr_number);
     if (duplicate) return 'That item is already on this voucher with the same LR number.';
@@ -137,6 +148,12 @@ export default function PurchaseOrdersPage() {
   const fgItems = allItems.filter((s) => s.item_type === 'FG');
   const rmfgItems = allItems.filter((s) => s.item_type === 'RM' || s.item_type === 'FG');
 
+  // Rows already on the voucher will draw on the same balance when it is saved.
+  const stockOutRemaining = stockOutAvailable === null ? null : stockOutAvailable - lines.reduce(
+    (sum, line) => (line.stock_out_item_id === draft.stock_out_item_id ? sum + Number(line.quantity || 0) : sum),
+    0,
+  );
+
   return (
     <div>
       {dialog}
@@ -178,6 +195,11 @@ export default function PurchaseOrdersPage() {
                     <option value="">Select</option>
                     {rmfgItems.map((s) => <option key={s.item_id} value={s.item_id}>{s.item_name} ({itemTypeLabel(s.item_type)})</option>)}
                   </select>
+                  {stockOutRemaining !== null && (
+                    <p className={`text-xs mt-1 ${stockOutRemaining > 0 ? 'text-gray-500' : 'text-red-600'}`}>
+                      Available qty: <strong>{stockOutRemaining}</strong> pcs
+                    </p>
+                  )}
                 </div>
                 <div><label className="label">Target FG Item (For GRN) *</label>
                   <select className="input" value={draft.target_fg_item_id} onChange={(e) => setDraft({ ...draft, target_fg_item_id: e.target.value })}>

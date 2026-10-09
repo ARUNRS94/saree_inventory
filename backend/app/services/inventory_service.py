@@ -113,8 +113,63 @@ class InventoryService:
 
         return {item_id: sorted(names) for item_id, names in vendors.items()}
 
+    async def voucher_maps(self) -> tuple[dict[int, list[str]], dict[int, list[str]]]:
+        """GSS voucher numbers and sub vendor voucher numbers an item has appeared on."""
+        gss: dict[int, set[str]] = {}
+        vendor_voucher: dict[int, set[str]] = {}
+
+        def record(bucket: dict[int, set[str]], item_id: int | None, number: str | None) -> None:
+            if item_id and number:
+                bucket.setdefault(item_id, set()).add(number)
+
+        grn_stmt = (
+            select(GRNItem.item_id, PurchaseOrder.voucher_number, GRN.vendor_voucher_number)
+            .join(GRN, GRN.grn_id == GRNItem.grn_id)
+            .outerjoin(PurchaseOrder, PurchaseOrder.po_id == GRN.po_id)
+            .distinct()
+        )
+        for item_id, voucher_number, vendor_number in await self.session.execute(grn_stmt):
+            record(gss, item_id, voucher_number)
+            record(vendor_voucher, item_id, vendor_number)
+
+        po_stmt = (
+            select(PurchaseOrderItem.item_id, PurchaseOrderItem.target_fg_item_id,
+                   PurchaseOrderItem.stock_out_item_id, PurchaseOrder.voucher_number)
+            .join(PurchaseOrder, PurchaseOrder.po_id == PurchaseOrderItem.po_id)
+            .distinct()
+        )
+        for item_id, target_fg_id, stock_out_id, voucher_number in await self.session.execute(po_stmt):
+            record(gss, item_id, voucher_number)
+            record(gss, target_fg_id, voucher_number)
+            record(gss, stock_out_id, voucher_number)
+
+        return (
+            {item_id: sorted(values) for item_id, values in gss.items()},
+            {item_id: sorted(values) for item_id, values in vendor_voucher.items()},
+        )
+
+    async def voucher_options(self) -> dict[str, list[str]]:
+        """Distinct voucher numbers, for the report and GRN filter dropdowns."""
+        gss = await self.session.scalars(
+            select(PurchaseOrder.voucher_number)
+            .where(PurchaseOrder.voucher_number.is_not(None))
+            .distinct().order_by(PurchaseOrder.voucher_number)
+        )
+        vendor_vouchers = await self.session.scalars(
+            select(GRN.vendor_voucher_number)
+            .where(GRN.vendor_voucher_number.is_not(None))
+            .distinct().order_by(GRN.vendor_voucher_number)
+        )
+        return {"voucher_numbers": list(gss), "vendor_voucher_numbers": list(vendor_vouchers)}
+
+    @staticmethod
+    def _matches_voucher(values: list[str], needle: str | None) -> bool:
+        return not needle or any(needle.lower() in value.lower() for value in values)
+
     async def stock_report(self, search: str = "", item_type: str | None = None,
-                           vendor: str | None = None, hide_zero: bool = False) -> list[dict]:
+                           vendor: str | None = None, hide_zero: bool = False,
+                           voucher_number: str | None = None,
+                           vendor_voucher_number: str | None = None) -> list[dict]:
         balance = func.coalesce(func.sum(StockLedger.qty_in - StockLedger.qty_out), 0).label("current_stock")
         stmt = (
             select(Item.item_id, Item.item_code, Item.item_name, Item.item_type, Item.category, balance)
@@ -129,17 +184,24 @@ class InventoryService:
             stmt = stmt.where(Item.item_name.ilike(like) | Item.item_code.ilike(like) | Item.category.ilike(like))
         result = await self.session.execute(stmt)
         vendors = await self.vendor_map()
+        gss_vouchers, vendor_vouchers = await self.voucher_maps()
         rows = [
             {
                 "item_id": sid, "item_code": code, "item_name": name,
                 "item_type": item_type_code or "FG", "category": category,
                 "vendors": vendors.get(sid, []), "current_stock": int(stock or 0),
+                "voucher_numbers": gss_vouchers.get(sid, []),
+                "vendor_voucher_numbers": vendor_vouchers.get(sid, []),
             }
             for sid, code, name, item_type_code, category, stock in result
         ]
         if vendor:
             needle = vendor.lower()
             rows = [r for r in rows if any(needle in v.lower() for v in r["vendors"])]
+        if voucher_number:
+            rows = [r for r in rows if self._matches_voucher(r["voucher_numbers"], voucher_number)]
+        if vendor_voucher_number:
+            rows = [r for r in rows if self._matches_voucher(r["vendor_voucher_numbers"], vendor_voucher_number)]
         if hide_zero:
             rows = [r for r in rows if r["current_stock"] != 0]
         return rows
@@ -204,11 +266,14 @@ class InventoryService:
         return rates
 
     async def inventory_valuation(self, search: str = "", item_type: str | None = None,
-                                  vendor: str | None = None, hide_zero: bool = False) -> list[dict]:
+                                  vendor: str | None = None, hide_zero: bool = False,
+                                  voucher_number: str | None = None,
+                                  vendor_voucher_number: str | None = None) -> list[dict]:
         await self.session.flush()
         stock_by_id = await self._stock_map()
         rate_by_id = await self._latest_rate_map()
         vendors = await self.vendor_map()
+        gss_vouchers, vendor_vouchers = await self.voucher_maps()
         stmt = select(Item).order_by(Item.item_name)
         if item_type:
             stmt = stmt.where(Item.item_type == item_type)
@@ -221,7 +286,13 @@ class InventoryService:
             stock = stock_by_id.get(item.item_id, 0)
             rate = rate_by_id.get(item.item_id, Decimal("0"))
             item_vendors = vendors.get(item.item_id, [])
+            item_gss = gss_vouchers.get(item.item_id, [])
+            item_vendor_vouchers = vendor_vouchers.get(item.item_id, [])
             if vendor and not any(vendor.lower() in v.lower() for v in item_vendors):
+                continue
+            if not self._matches_voucher(item_gss, voucher_number):
+                continue
+            if not self._matches_voucher(item_vendor_vouchers, vendor_voucher_number):
                 continue
             if hide_zero and stock == 0:
                 continue
@@ -232,6 +303,8 @@ class InventoryService:
                 "item_type": item.item_type,
                 "category": item.category,
                 "vendors": item_vendors,
+                "voucher_numbers": item_gss,
+                "vendor_voucher_numbers": item_vendor_vouchers,
                 "current_stock": stock,
                 "latest_rate": rate,
                 "value": Decimal(stock) * rate,

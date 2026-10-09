@@ -192,6 +192,8 @@ export interface StockSummary {
   item_type: string | null;
   category: string | null;
   vendors: string[];
+  voucher_numbers: string[];
+  vendor_voucher_numbers: string[];
   current_stock: number;
 }
 
@@ -202,6 +204,8 @@ export interface StockValuation {
   item_type: string | null;
   category: string | null;
   vendors: string[];
+  voucher_numbers: string[];
+  vendor_voucher_numbers: string[];
   current_stock: number;
   latest_rate: number;
   value: number;

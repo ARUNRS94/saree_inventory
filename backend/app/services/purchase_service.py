@@ -317,7 +317,8 @@ class PurchaseService:
 
     async def list_grns(self, po_id: int | None = None, search: str = "",
                         date_from: date | None = None, date_to: date | None = None,
-                        page: int = 1, page_size: int = 50, grn_type: str | None = None) -> tuple[list[GRN], int]:
+                        page: int = 1, page_size: int = 50, grn_type: str | None = None,
+                        voucher_number: str | None = None) -> tuple[list[GRN], int]:
         stmt = select(GRN).options(
             selectinload(GRN.purchase_order).selectinload(PurchaseOrder.contact),
             selectinload(GRN.contact),
@@ -327,6 +328,13 @@ class PurchaseService:
         if po_id:
             stmt = stmt.where(GRN.po_id == po_id)
             count_stmt = count_stmt.where(GRN.po_id == po_id)
+        if voucher_number:
+            # A voucher is either the GSS number on the parent PO or the vendor's own number on the GRN.
+            voucher_filter = GRN.po_id.in_(
+                select(PurchaseOrder.po_id).where(PurchaseOrder.voucher_number == voucher_number)
+            ) | (GRN.vendor_voucher_number == voucher_number)
+            stmt = stmt.where(voucher_filter)
+            count_stmt = count_stmt.where(voucher_filter)
         if grn_type:
             stmt = stmt.where(GRN.grn_type == grn_type)
             count_stmt = count_stmt.where(GRN.grn_type == grn_type)

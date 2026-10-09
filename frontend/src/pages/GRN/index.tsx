@@ -35,6 +35,8 @@ export default function GRNPage() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState('');
+  const [filterVoucher, setFilterVoucher] = useState('');
+  const [voucherOptions, setVoucherOptions] = useState<string[]>([]);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [loading, setLoading] = useState(true);
@@ -59,13 +61,17 @@ export default function GRNPage() {
 
   const load = useCallback(() => {
     setLoading(true);
-    api.get('/grns', { params: { page, page_size: 50, search: search || undefined, grn_type: filterType || undefined, date_from: dateFrom || undefined, date_to: dateTo || undefined } }).then((r) => setData(r.data)).finally(() => setLoading(false));
-  }, [page, search, filterType, dateFrom, dateTo]);
+    api.get('/grns', { params: { page, page_size: 50, search: search || undefined, grn_type: filterType || undefined, voucher_number: filterVoucher || undefined, date_from: dateFrom || undefined, date_to: dateTo || undefined } }).then((r) => setData(r.data)).finally(() => setLoading(false));
+  }, [page, search, filterType, filterVoucher, dateFrom, dateTo]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
     api.get('/purchase-orders', { params: { page_size: 200 } }).then((r) => {
       setOpenPOs(r.data.items.filter((po: PurchaseOrder) => po.status !== 'CLOSED' && po.status !== 'CANCELLED'));
+    });
+    api.get('/inventory/vouchers').then((r) => {
+      const { voucher_numbers, vendor_voucher_numbers } = r.data as { voucher_numbers: string[]; vendor_voucher_numbers: string[] };
+      setVoucherOptions(Array.from(new Set([...voucher_numbers, ...vendor_voucher_numbers])).sort());
     });
     api.get('/items', { params: { page_size: 500 } }).then((r) => setAllItems(r.data.items));
     api.get('/contacts', { params: { page_size: 200, contact_type: RM_VENDOR } }).then((r) => setRmVendors(r.data.items));
@@ -380,9 +386,12 @@ export default function GRNPage() {
             filters={[{
               label: 'Inward Type', value: filterType, onChange: (v) => { setFilterType(v); setPage(1); },
               options: [{ value: '', label: 'All' }, { value: RAW_MATERIAL, label: 'Raw Material' }, { value: SUB_VENDOR_GRN, label: 'Sub Vendor' }],
+            }, {
+              label: 'Voucher', value: filterVoucher, onChange: (v) => { setFilterVoucher(v); setPage(1); },
+              options: [{ value: '', label: 'All Vouchers' }, ...voucherOptions.map((v) => ({ value: v, label: v }))],
             }]}
             dateRange={{ from: dateFrom, to: dateTo, onFromChange: (v) => { setDateFrom(v); setPage(1); }, onToChange: (v) => { setDateTo(v); setPage(1); } }}
-            onClear={() => { setSearch(''); setFilterType(''); setDateFrom(''); setDateTo(''); setPage(1); }}
+            onClear={() => { setSearch(''); setFilterType(''); setFilterVoucher(''); setDateFrom(''); setDateTo(''); setPage(1); }}
           />
         </div>
         {loading ? <LoadingState /> : data.items.length === 0 ? <EmptyState /> : (

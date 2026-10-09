@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.dependencies import get_current_user, get_db
 from app.models.item import Item
 from app.models.stock_ledger import StockLedger
-from app.schemas.inventory import CustomerIssueCreate, StockLedgerListResponse, StockLedgerResponse, StockSummaryResponse, StockValuationResponse
+from app.schemas.inventory import CustomerIssueCreate, StockLedgerListResponse, StockLedgerResponse, StockSummaryResponse, StockValuationResponse, VoucherOptionsResponse
 from app.services.inventory_service import InventoryService
 
 router = APIRouter(prefix="/inventory", tags=["Inventory"])
@@ -18,10 +18,17 @@ router = APIRouter(prefix="/inventory", tags=["Inventory"])
 @router.get("/stock", response_model=list[StockSummaryResponse])
 async def get_stock(
     search: str = "", item_type: str | None = None, vendor: str | None = None, hide_zero: bool = False,
+    voucher_number: str | None = None, vendor_voucher_number: str | None = None,
     db: AsyncSession = Depends(get_db), _user=Depends(get_current_user),
 ):
-    rows = await InventoryService(db).stock_report(search, item_type, vendor, hide_zero)
+    rows = await InventoryService(db).stock_report(search, item_type, vendor, hide_zero,
+                                                   voucher_number, vendor_voucher_number)
     return [StockSummaryResponse(**r) for r in rows]
+
+
+@router.get("/vouchers", response_model=VoucherOptionsResponse)
+async def get_voucher_options(db: AsyncSession = Depends(get_db), _user=Depends(get_current_user)):
+    return VoucherOptionsResponse(**await InventoryService(db).voucher_options())
 
 
 @router.get("/stock/{item_id}")
@@ -33,9 +40,11 @@ async def get_stock_qty(item_id: int, db: AsyncSession = Depends(get_db), _user=
 @router.get("/valuation", response_model=list[StockValuationResponse])
 async def get_valuation(
     search: str = "", item_type: str | None = None, vendor: str | None = None, hide_zero: bool = False,
+    voucher_number: str | None = None, vendor_voucher_number: str | None = None,
     db: AsyncSession = Depends(get_db), _user=Depends(get_current_user),
 ):
-    rows = await InventoryService(db).inventory_valuation(search, item_type, vendor, hide_zero)
+    rows = await InventoryService(db).inventory_valuation(search, item_type, vendor, hide_zero,
+                                                          voucher_number, vendor_voucher_number)
     return [StockValuationResponse(**r) for r in rows]
 
 

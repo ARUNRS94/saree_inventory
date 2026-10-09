@@ -39,10 +39,12 @@ def _grn_to_response(grn) -> GRNResponse:
 async def list_grns(
     po_id: int | None = None, search: str = "", grn_type: str | None = None,
     date_from: date | None = None, date_to: date | None = None,
+    voucher_number: str | None = None,
     page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db), _user=Depends(get_current_user),
 ):
-    grns, total = await PurchaseService(db).list_grns(po_id, search, date_from, date_to, page, page_size, grn_type)
+    grns, total = await PurchaseService(db).list_grns(po_id, search, date_from, date_to, page, page_size,
+                                                      grn_type, voucher_number)
     return GRNListResponse(
         items=[_grn_to_response(g) for g in grns],
         total=total, page=page, page_size=page_size,
