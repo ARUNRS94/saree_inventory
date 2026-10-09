@@ -166,6 +166,14 @@ class InventoryService:
     def _matches_voucher(values: list[str], needle: str | None) -> bool:
         return not needle or any(needle.lower() in value.lower() for value in values)
 
+    @staticmethod
+    def _matches_search(row: dict, needle: str) -> bool:
+        """Free text search spans the item, its vendors and both voucher numbers."""
+        lowered = needle.lower()
+        values = [row["item_name"], row["item_code"], *row["vendors"],
+                  *row["voucher_numbers"], *row["vendor_voucher_numbers"]]
+        return any(value and lowered in value.lower() for value in values)
+
     async def stock_report(self, search: str = "", item_type: str | None = None,
                            vendor: str | None = None, hide_zero: bool = False,
                            voucher_number: str | None = None,
@@ -179,9 +187,6 @@ class InventoryService:
         )
         if item_type:
             stmt = stmt.where(Item.item_type == item_type)
-        if search:
-            like = f"%{search}%"
-            stmt = stmt.where(Item.item_name.ilike(like) | Item.item_code.ilike(like) | Item.category.ilike(like))
         result = await self.session.execute(stmt)
         vendors = await self.vendor_map()
         gss_vouchers, vendor_vouchers = await self.voucher_maps()
@@ -198,6 +203,8 @@ class InventoryService:
         if vendor:
             needle = vendor.lower()
             rows = [r for r in rows if any(needle in v.lower() for v in r["vendors"])]
+        if search:
+            rows = [r for r in rows if self._matches_search(r, search)]
         if voucher_number:
             rows = [r for r in rows if self._matches_voucher(r["voucher_numbers"], voucher_number)]
         if vendor_voucher_number:
@@ -277,9 +284,6 @@ class InventoryService:
         stmt = select(Item).order_by(Item.item_name)
         if item_type:
             stmt = stmt.where(Item.item_type == item_type)
-        if search:
-            like = f"%{search}%"
-            stmt = stmt.where(Item.item_name.ilike(like) | Item.item_code.ilike(like) | Item.category.ilike(like))
         items = (await self.session.execute(stmt)).scalars().all()
         rows = []
         for item in items:
@@ -296,7 +300,7 @@ class InventoryService:
                 continue
             if hide_zero and stock == 0:
                 continue
-            rows.append({
+            row = {
                 "item_id": item.item_id,
                 "item_code": item.item_code,
                 "item_name": item.item_name,
@@ -308,7 +312,10 @@ class InventoryService:
                 "current_stock": stock,
                 "latest_rate": rate,
                 "value": Decimal(stock) * rate,
-            })
+            }
+            if search and not self._matches_search(row, search):
+                continue
+            rows.append(row)
         return rows
 
     def ledger_filters(self, search: str = "", transaction_type: str | None = None,

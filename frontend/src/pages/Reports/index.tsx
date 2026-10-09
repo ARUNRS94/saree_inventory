@@ -136,7 +136,7 @@ export default function ReportsPage() {
           ) : (
             <>
               <FilterBar
-                search={{ value: search, onChange: setSearch, placeholder: 'Search item name or code...' }}
+                search={{ value: search, onChange: setSearch, placeholder: 'Search item, vendor or voucher number...' }}
                 filters={[
                   { label: 'Type', value: itemType, onChange: setItemType,
                     options: [{ value: '', label: 'All Types' }, ...ITEM_TYPE_OPTIONS] },

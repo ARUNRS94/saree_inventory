@@ -340,7 +340,25 @@ class PurchaseService:
             count_stmt = count_stmt.where(GRN.grn_type == grn_type)
         if search:
             like = f"%{search}%"
-            text_filter = GRN.grn_number.ilike(like) | GRN.vendor_voucher_number.ilike(like)
+            # A GRN is findable by its own numbers, its vendor, or the voucher/PO it came off.
+            po_match = (
+                select(PurchaseOrder.po_id)
+                .join(Contact, Contact.contact_id == PurchaseOrder.contact_id)
+                .where(
+                    PurchaseOrder.voucher_number.ilike(like)
+                    | PurchaseOrder.po_number.ilike(like)
+                    | Contact.contact_name.ilike(like)
+                )
+            )
+            line_match = select(GRNItem.grn_id).where(GRNItem.po_number.ilike(like))
+            contact_match = select(Contact.contact_id).where(Contact.contact_name.ilike(like))
+            text_filter = (
+                GRN.grn_number.ilike(like)
+                | GRN.vendor_voucher_number.ilike(like)
+                | GRN.po_id.in_(po_match)
+                | GRN.contact_id.in_(contact_match)
+                | GRN.grn_id.in_(line_match)
+            )
             stmt = stmt.where(text_filter)
             count_stmt = count_stmt.where(text_filter)
         if date_from:

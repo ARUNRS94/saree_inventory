@@ -382,7 +382,7 @@ export default function GRNPage() {
       <div className="card">
         <div className="p-4 border-b border-gray-100">
           <FilterBar
-            search={{ value: search, onChange: (v) => { setSearch(v); setPage(1); }, placeholder: 'Search GRN or vendor voucher number...' }}
+            search={{ value: search, onChange: (v) => { setSearch(v); setPage(1); }, placeholder: 'Search GRN, vendor or voucher number...' }}
             filters={[{
               label: 'Inward Type', value: filterType, onChange: (v) => { setFilterType(v); setPage(1); },
               options: [{ value: '', label: 'All' }, { value: RAW_MATERIAL, label: 'Raw Material' }, { value: SUB_VENDOR_GRN, label: 'Sub Vendor' }],
