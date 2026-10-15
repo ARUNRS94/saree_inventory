@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -12,9 +12,14 @@ from app.models.grn import GRN, GRN_TYPE_RAW_MATERIAL, GRN_TYPE_SUB_VENDOR, GRNI
 from app.models.purchase_order import PurchaseOrder, PurchaseOrderItem
 from app.models.item import Item
 from app.models.contact import Contact
+from app.models.stock_ledger import StockLedger
 from app.services.inventory_service import InventoryService
 from app.services.master_service import CUSTOMER, RM_VENDOR, SUB_VENDOR
 from app.services.numbering import next_number
+
+# Movements a document owns, and therefore withdraws when it is edited.
+PO_LEDGER_TYPES = ("SUB_VENDOR_ISSUE", "WIP_STOCK_IN")
+GRN_LEDGER_TYPES = ("PURCHASE", "SUB_VENDOR_GRN", "WIP_STOCK_OUT")
 
 
 @dataclass(frozen=True)
@@ -53,11 +58,7 @@ class PurchaseService:
                         voucher_number: str | None = None) -> PurchaseOrder:
         if not lines:
             raise ValueError("Purchase order requires at least one item line.")
-        contact = await self.session.get(Contact, contact_id)
-        if contact is None:
-            raise ValueError("Contact not found.")
-        if contact.contact_type == CUSTOMER:
-            raise ValueError("Purchase orders can be created only for Raw Material Vendors or Sub vendors.")
+        contact = await self._purchase_contact(contact_id)
         document_date = po_date or date.today()
         po = PurchaseOrder(
             po_number=await next_number(self.session, PurchaseOrder, "po_number", "PO", document_date),
@@ -68,6 +69,63 @@ class PurchaseService:
             remarks=remarks,
             status="OPEN",
         )
+        await self._apply_po_lines(po, contact, lines, document_date, remarks)
+        self.session.add(po)
+        await self.session.flush()
+        return po
+
+    async def update_po(self, po_id: int, contact_id: int, lines: list[PurchaseLine],
+                        po_date: date | None = None, expected_date: date | None = None,
+                        remarks: str | None = None, voucher_number: str | None = None) -> PurchaseOrder:
+        """Re-raises the voucher in place: its stock movements are withdrawn and posted again."""
+        po = await self.session.get(PurchaseOrder, po_id, populate_existing=True,
+                                    options=[selectinload(PurchaseOrder.contact), selectinload(PurchaseOrder.items)])
+        if po is None:
+            raise ValueError("Purchase order not found.")
+        if po.status == "CANCELLED":
+            raise ValueError("A cancelled voucher can no longer be edited.")
+        if await self._accounted_qty(po.po_id) > 0:
+            raise ValueError("This voucher already has GRN receipts against it, so it can no longer be edited.")
+        if not lines:
+            raise ValueError("Purchase order requires at least one item line.")
+        contact = await self._purchase_contact(contact_id)
+
+        await self._withdraw_ledger(po.po_number, PO_LEDGER_TYPES)
+        po.items.clear()
+        await self.session.flush()
+
+        document_date = po_date or po.po_date
+        po.contact_id = contact_id
+        po.contact = contact
+        po.voucher_number = (voucher_number or "").strip() or None
+        po.po_date = document_date
+        po.expected_date = expected_date
+        po.remarks = remarks
+        po.status = "OPEN"
+        await self._apply_po_lines(po, contact, lines, document_date, remarks)
+        await self.session.flush()
+        return po
+
+    async def _purchase_contact(self, contact_id: int) -> Contact:
+        contact = await self.session.get(Contact, contact_id)
+        if contact is None:
+            raise ValueError("Contact not found.")
+        if contact.contact_type == CUSTOMER:
+            raise ValueError("Purchase orders can be created only for Raw Material Vendors or Sub vendors.")
+        return contact
+
+    async def _withdraw_ledger(self, reference_no: str, transaction_types: tuple[str, ...]) -> None:
+        await self.session.flush()
+        await self.session.execute(
+            delete(StockLedger)
+            .where(StockLedger.reference_no == reference_no,
+                   StockLedger.transaction_type.in_(transaction_types))
+            .execution_options(synchronize_session=False)
+        )
+        await self.session.flush()
+
+    async def _apply_po_lines(self, po: PurchaseOrder, contact: Contact, lines: list[PurchaseLine],
+                              document_date: date, remarks: str | None) -> None:
         for line in lines:
             if line.quantity <= 0 or line.rate < 0:
                 raise ValueError("PO quantity must be positive and rate/process charges cannot be negative.")
@@ -107,21 +165,13 @@ class PurchaseService:
                 amount=line.rate * line.quantity,
                 lr_number=line.lr_number,
             ))
-        self.session.add(po)
-        await self.session.flush()
-        return po
 
     async def receive_direct_grn(self, contact_id: int | None, lines: list[GRNLine],
                                  grn_date: date | None = None, remarks: str | None = None) -> GRN:
         """Raw Material arrives without a voucher, so the GRN is the first document."""
         if not lines:
             raise ValueError("GRN requires at least one received line.")
-        contact = await self.session.get(Contact, contact_id) if contact_id else None
-        if contact_id and contact is None:
-            raise ValueError("Contact not found.")
-        if contact is not None and contact.contact_type != RM_VENDOR:
-            raise ValueError("Direct GRNs can be raised only against a Raw Material Vendor.")
-
+        await self._raw_material_contact(contact_id)
         document_date = grn_date or date.today()
         grn = GRN(
             grn_number=await next_number(self.session, GRN, "grn_number", "GRN", document_date),
@@ -131,6 +181,21 @@ class PurchaseService:
             grn_date=document_date,
             remarks=remarks,
         )
+        await self._apply_direct_grn_lines(grn, lines, document_date, remarks)
+        self.session.add(grn)
+        await self.session.flush()
+        return grn
+
+    async def _raw_material_contact(self, contact_id: int | None) -> Contact | None:
+        contact = await self.session.get(Contact, contact_id) if contact_id else None
+        if contact_id and contact is None:
+            raise ValueError("Contact not found.")
+        if contact is not None and contact.contact_type != RM_VENDOR:
+            raise ValueError("Direct GRNs can be raised only against a Raw Material Vendor.")
+        return contact
+
+    async def _apply_direct_grn_lines(self, grn: GRN, lines: list[GRNLine],
+                                      document_date: date, remarks: str | None) -> None:
         for line in lines:
             if line.received_qty <= 0:
                 raise ValueError("Quantity is required on every Raw Material inward item.")
@@ -148,9 +213,6 @@ class PurchaseService:
                 reference_no=grn.grn_number, item_id=line.item_id,
                 qty_in=line.received_qty, rate=line.rate, remarks=remarks,
             )
-        self.session.add(grn)
-        await self.session.flush()
-        return grn
 
     async def receive_grn(self, po_id: int, lines: list[GRNLine] | list[tuple[int, int, int, Decimal]],
                           grn_date: date | None = None, remarks: str | None = None,
@@ -172,6 +234,14 @@ class PurchaseService:
             vendor_voucher_number=(vendor_voucher_number or "").strip() or None,
             remarks=remarks,
         )
+        await self._apply_po_grn_lines(grn, po, receipt_lines, document_date, remarks)
+        self.session.add(grn)
+        await self.session.flush()
+        await self._update_po_status(po)
+        return grn
+
+    async def _apply_po_grn_lines(self, grn: GRN, po: PurchaseOrder, receipt_lines: list[GRNLine],
+                                  document_date: date, remarks: str | None) -> None:
         transaction_type = "SUB_VENDOR_GRN" if po.contact.contact_type == SUB_VENDOR else "PURCHASE"
         # Earlier lines of this GRN are not yet persisted, so their quantities are tracked here.
         claimed: dict[int | None, int] = {}
@@ -188,13 +258,13 @@ class PurchaseService:
                 if allowed_fg_ids and item_id not in allowed_fg_ids:
                     raise ValueError("GRN stock-in item must match the Finished Goods item selected on the Sub vendor PO.")
                 pending_key = None
-                pending = await self.pending_po_qty(po_id)
+                pending = await self.pending_po_qty(po.po_id)
             else:
                 stock_in_item = await self.session.get(Item, item_id)
                 if stock_in_item is None or stock_in_item.item_type != "RM":
                     raise ValueError("Raw Material Vendor GRN stock-in item must be a Raw Material item.")
                 pending_key = item_id
-                pending = await self.pending_po_qty(po_id, item_id)
+                pending = await self.pending_po_qty(po.po_id, item_id)
             pending -= claimed.get(pending_key, 0)
             if total_receipt_qty > pending:
                 raise ValueError(f"Receipt quantity exceeds pending PO quantity. Pending: {pending}.")
@@ -210,9 +280,45 @@ class PurchaseService:
                     reference_no=grn.grn_number, item_id=item_id,
                     qty_in=received_qty, rate=rate, remarks=remarks,
                 )
-        self.session.add(grn)
+
+    async def update_grn(self, grn_id: int, lines: list[GRNLine], grn_date: date | None = None,
+                         remarks: str | None = None, vendor_voucher_number: str | None = None,
+                         contact_id: int | None = None) -> GRN:
+        """Reposts a GRN in place: its stock movements are withdrawn and applied again."""
+        grn = await self.session.get(GRN, grn_id, populate_existing=True, options=[
+            selectinload(GRN.items),
+            selectinload(GRN.purchase_order).selectinload(PurchaseOrder.contact),
+            selectinload(GRN.purchase_order).selectinload(PurchaseOrder.items),
+        ])
+        if grn is None:
+            raise ValueError("GRN not found.")
+        if not lines:
+            raise ValueError("GRN requires at least one received line.")
+        touched_items = {item.item_id for item in grn.items} | {line.item_id for line in lines}
+
+        await self._withdraw_ledger(grn.grn_number, GRN_LEDGER_TYPES)
+        grn.items.clear()
         await self.session.flush()
-        await self._update_po_status(po)
+
+        document_date = grn_date or grn.grn_date
+        grn.grn_date = document_date
+        grn.remarks = remarks
+        if grn.grn_type == GRN_TYPE_RAW_MATERIAL:
+            await self._raw_material_contact(contact_id)
+            grn.contact_id = contact_id
+            await self._apply_direct_grn_lines(grn, lines, document_date, remarks)
+        else:
+            po = grn.purchase_order
+            if po is None:
+                raise ValueError("The voucher behind this GRN is missing.")
+            grn.vendor_voucher_number = (vendor_voucher_number or "").strip() or None
+            await self._apply_po_grn_lines(grn, po, lines, document_date, remarks)
+        await self.session.flush()
+        if grn.purchase_order is not None:
+            await self._update_po_status(grn.purchase_order)
+        for item_id in touched_items:
+            if await self.inventory.current_stock(item_id) < 0:
+                raise ValueError("This change would push stock below zero. Reverse the later movements first.")
         return grn
 
     async def pending_po_qty(self, po_id: int, item_id: int | None = None) -> int:

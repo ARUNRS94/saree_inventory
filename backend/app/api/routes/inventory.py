@@ -55,18 +55,8 @@ async def get_ledger(
     page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db), _user=Depends(get_current_user),
 ):
-    base_filter = []
-    if transaction_type:
-        base_filter.append(StockLedger.transaction_type == transaction_type)
-    if date_from:
-        base_filter.append(StockLedger.transaction_date >= date_from)
-    if date_to:
-        base_filter.append(StockLedger.transaction_date <= date_to)
-    if search:
-        like = f"%{search}%"
-        base_filter.append(
-            StockLedger.reference_no.ilike(like) | Item.item_code.ilike(like) | Item.item_name.ilike(like)
-        )
+    service = InventoryService(db)
+    base_filter = service.ledger_filters(search, transaction_type, date_from, date_to)
 
     count_stmt = select(func.count()).select_from(StockLedger).join(Item, Item.item_id == StockLedger.item_id)
     for f in base_filter:
@@ -81,15 +71,20 @@ async def get_ledger(
         stmt = stmt.where(f)
     stmt = stmt.order_by(StockLedger.transaction_date.desc(), StockLedger.ledger_id.desc()).offset((page - 1) * page_size).limit(page_size)
     result = await db.execute(stmt)
+    vendors = await service.reference_vendor_map()
     items = []
     for entry, code, name in result:
         items.append(StockLedgerResponse(
             ledger_id=entry.ledger_id, transaction_date=entry.transaction_date,
             transaction_type=entry.transaction_type, reference_no=entry.reference_no,
+            vendor_name=vendors.get(entry.reference_no),
             item_id=entry.item_id, item_code=code, item_name=name,
-            qty_in=entry.qty_in, qty_out=entry.qty_out, rate=entry.rate, remarks=entry.remarks,
+            qty_in=entry.qty_in, qty_out=entry.qty_out, rate=entry.rate,
+            amount=(entry.qty_in + entry.qty_out) * entry.rate, remarks=entry.remarks,
         ))
-    return StockLedgerListResponse(items=items, total=total, page=page, page_size=page_size)
+    total_amount = await service.ledger_total_amount(search, transaction_type, date_from, date_to)
+    return StockLedgerListResponse(items=items, total=total, page=page, page_size=page_size,
+                                   total_amount=total_amount)
 
 
 @router.post("/customer-issue", status_code=201)

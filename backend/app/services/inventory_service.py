@@ -7,10 +7,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.grn import GRN, GRNItem
+from app.models.job_work import JobWorkIssue, JobWorkReceipt
 from app.models.purchase_order import PurchaseOrder, PurchaseOrderItem
 from app.models.contact import Contact
 from app.models.item import Item
 from app.models.stock_ledger import StockLedger
+from app.models.vendor import Vendor
 
 # Reports are rendered in one pass inside a serverless function, so the row count is bounded.
 MOVEMENT_REPORT_LIMIT = 5_000
@@ -331,8 +333,69 @@ class InventoryService:
             like = f"%{search}%"
             filters.append(
                 StockLedger.reference_no.ilike(like) | Item.item_code.ilike(like) | Item.item_name.ilike(like)
+                | self._vendor_reference_filter(like)
             )
         return filters
+
+    @staticmethod
+    def _vendor_reference_filter(like: str):
+        """Matches movements whose source document belongs to a vendor with this name."""
+        contact_name = Contact.contact_name.ilike(like)
+        po_refs = (
+            select(PurchaseOrder.po_number)
+            .join(Contact, Contact.contact_id == PurchaseOrder.contact_id).where(contact_name)
+        )
+        grn_refs = (
+            select(GRN.grn_number)
+            .outerjoin(PurchaseOrder, PurchaseOrder.po_id == GRN.po_id)
+            .join(Contact, Contact.contact_id == func.coalesce(GRN.contact_id, PurchaseOrder.contact_id))
+            .where(contact_name)
+        )
+        issue_refs = (
+            select(JobWorkIssue.issue_no)
+            .join(Vendor, Vendor.vendor_id == JobWorkIssue.vendor_id).where(Vendor.vendor_name.ilike(like))
+        )
+        receipt_refs = (
+            select(JobWorkReceipt.receipt_no)
+            .join(Vendor, Vendor.vendor_id == JobWorkReceipt.vendor_id).where(Vendor.vendor_name.ilike(like))
+        )
+        return (
+            StockLedger.reference_no.in_(po_refs)
+            | StockLedger.reference_no.in_(grn_refs)
+            | StockLedger.reference_no.in_(issue_refs)
+            | StockLedger.reference_no.in_(receipt_refs)
+        )
+
+    async def reference_vendor_map(self) -> dict[str, str]:
+        """Vendor behind each ledger reference, so a movement can show who it belongs to."""
+        mapping: dict[str, str] = {}
+        statements = (
+            select(PurchaseOrder.po_number, Contact.contact_name)
+            .join(Contact, Contact.contact_id == PurchaseOrder.contact_id),
+            select(GRN.grn_number, Contact.contact_name)
+            .outerjoin(PurchaseOrder, PurchaseOrder.po_id == GRN.po_id)
+            .join(Contact, Contact.contact_id == func.coalesce(GRN.contact_id, PurchaseOrder.contact_id)),
+            select(JobWorkIssue.issue_no, Vendor.vendor_name)
+            .join(Vendor, Vendor.vendor_id == JobWorkIssue.vendor_id),
+            select(JobWorkReceipt.receipt_no, Vendor.vendor_name)
+            .join(Vendor, Vendor.vendor_id == JobWorkReceipt.vendor_id),
+        )
+        for stmt in statements:
+            for reference, name in await self.session.execute(stmt):
+                if reference and name:
+                    mapping[reference] = name
+        return mapping
+
+    async def ledger_total_amount(self, search: str = "", transaction_type: str | None = None,
+                                  date_from: date | None = None, date_to: date | None = None) -> Decimal:
+        """Value of every movement the filters keep, not just the page on screen."""
+        stmt = (
+            select(func.coalesce(func.sum((StockLedger.qty_in + StockLedger.qty_out) * StockLedger.rate), 0))
+            .select_from(StockLedger).join(Item, Item.item_id == StockLedger.item_id)
+        )
+        for condition in self.ledger_filters(search, transaction_type, date_from, date_to):
+            stmt = stmt.where(condition)
+        return Decimal(str(await self.session.scalar(stmt) or 0))
 
     async def movement_report(self, search: str = "", transaction_type: str | None = None,
                               date_from: date | None = None, date_to: date | None = None,
@@ -346,16 +409,19 @@ class InventoryService:
         stmt = stmt.order_by(StockLedger.transaction_date.desc(), StockLedger.ledger_id.desc())
         stmt = stmt.limit(min(limit, MOVEMENT_REPORT_LIMIT))
         result = await self.session.execute(stmt)
+        vendors = await self.reference_vendor_map()
         return [
             {
                 "transaction_date": entry.transaction_date,
                 "transaction_type": entry.transaction_type,
                 "reference_no": entry.reference_no,
+                "vendor_name": vendors.get(entry.reference_no),
                 "item_name": name,
                 "item_type": item_type,
                 "qty_in": entry.qty_in,
                 "qty_out": entry.qty_out,
                 "rate": entry.rate,
+                "amount": Decimal(entry.qty_in + entry.qty_out) * entry.rate,
                 "remarks": entry.remarks or "",
             }
             for entry, name, item_type in result

@@ -216,12 +216,14 @@ export interface StockLedgerEntry {
   transaction_date: string;
   transaction_type: string;
   reference_no: string;
+  vendor_name: string | null;
   item_id: number;
   item_code: string | null;
   item_name: string | null;
   qty_in: number;
   qty_out: number;
   rate: number;
+  amount: number;
   remarks: string | null;
 }
 

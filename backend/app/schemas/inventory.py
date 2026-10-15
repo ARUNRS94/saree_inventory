@@ -12,12 +12,14 @@ class StockLedgerResponse(BaseModel):
     transaction_date: date
     transaction_type: str
     reference_no: str
+    vendor_name: str | None = None
     item_id: int
     item_code: str | None = None
     item_name: str | None = None
     qty_in: int
     qty_out: int
     rate: Money
+    amount: Money
     remarks: str | None
 
     model_config = {"from_attributes": True}
@@ -28,6 +30,7 @@ class StockLedgerListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+    total_amount: Money = 0
 
 
 class StockSummaryResponse(BaseModel):

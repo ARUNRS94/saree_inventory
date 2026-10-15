@@ -82,6 +82,30 @@ async def create_po(body: PurchaseOrderCreate, db: AsyncSession = Depends(get_db
         raise HTTPException(400, str(e))
 
 
+@router.put("/{po_id}", response_model=PurchaseOrderResponse)
+async def update_po(po_id: int, body: PurchaseOrderCreate, db: AsyncSession = Depends(get_db), _user=Depends(get_current_user)):
+    try:
+        lines = [PurchaseLine(
+            item_id=item.item_id, quantity=item.quantity, rate=item.rate,
+            stock_out_item_id=item.stock_out_item_id, target_fg_item_id=item.target_fg_item_id,
+            lr_number=item.lr_number,
+        ) for item in body.items]
+        po = await PurchaseService(db).update_po(
+            po_id, body.contact_id, lines, body.po_date, body.expected_date, body.remarks, body.voucher_number,
+        )
+        from sqlalchemy.orm import selectinload
+        from app.models.purchase_order import PurchaseOrder, PurchaseOrderItem
+        po = await db.get(PurchaseOrder, po.po_id, populate_existing=True, options=[
+            selectinload(PurchaseOrder.contact),
+            selectinload(PurchaseOrder.items).selectinload(PurchaseOrderItem.item),
+            selectinload(PurchaseOrder.items).selectinload(PurchaseOrderItem.stock_out_item),
+            selectinload(PurchaseOrder.items).selectinload(PurchaseOrderItem.target_fg_item),
+        ])
+        return _po_to_response(po)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @router.put("/{po_id}/status", response_model=PurchaseOrderResponse)
 async def update_po_status(po_id: int, body: PurchaseOrderStatusUpdate, db: AsyncSession = Depends(get_db), _user=Depends(get_current_user)):
     try:

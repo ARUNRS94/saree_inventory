@@ -3,6 +3,7 @@ import api from '@/services/api';
 import type { GRN, PurchaseOrder, Item, Contact, PaginatedResponse } from '@/types';
 import { PageHeader } from '@/components/PageHeader';
 import { FilterBar } from '@/components/FilterBar';
+import { ExportButtons } from '@/components/ExportButtons';
 import { DataTable, Pagination } from '@/components/DataTable';
 import { LoadingState, EmptyState } from '@/components/LoadingState';
 import { useConfirmDialog } from '@/components/ConfirmDialog';
@@ -51,6 +52,9 @@ export default function GRNPage() {
   const [form, setForm] = useState({ grn_type: RAW_MATERIAL, po_id: '', contact_id: '', vendor_voucher_number: '', remarks: '' });
   const [lines, setLines] = useState<GRNLineForm[]>([]);
   const [draft, setDraft] = useState<GRNLineForm>(emptyInwardLine());
+  const [editingId, setEditingId] = useState<number | null>(null);
+  // Quantities already on the GRN being edited, keyed by stock in item.
+  const [editingItems, setEditingItems] = useState<Record<string, GRNLineForm>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -89,19 +93,20 @@ export default function GRNPage() {
       const isSub = selectedPO.contact_type === SUB_VENDOR;
       const stockInId = isSub ? poItem.target_fg_item_id : poItem.item_id;
       const match = allItems.find((s) => s.item_id === stockInId);
+      const booked = stockInId ? editingItems[String(stockInId)] : undefined;
       return {
         item_id: stockInId ? String(stockInId) : '',
         label: match?.item_name ?? poItem.item_name ?? '',
         ordered_qty: poItem.ordered_qty,
-        received_qty: '',
-        damaged_qty: '',
-        short_qty: '',
-        rate: String(poItem.rate),
-        lr_number: poItem.lr_number ?? '',
+        received_qty: booked?.received_qty ?? '',
+        damaged_qty: booked?.damaged_qty ?? '',
+        short_qty: booked?.short_qty ?? '',
+        rate: booked?.rate ?? String(poItem.rate),
+        lr_number: booked?.lr_number ?? (poItem.lr_number ?? ''),
         po_number: selectedPO.voucher_number ?? selectedPO.po_number,
       };
     }));
-  }, [selectedPO, allItems, isRawMaterial]);
+  }, [selectedPO, allItems, isRawMaterial, editingItems]);
 
   useEffect(() => {
     if (isRawMaterial || !selectedPO) { setPoPendingQty(null); setItemPendingQty({}); return; }
@@ -128,7 +133,12 @@ export default function GRNPage() {
       (sum, other, i) => (i !== index && (isSubVendorPO || other.item_id === row.item_id) ? sum + lineTotal(other) : sum),
       0,
     );
-    return Math.max(reported - claimedElsewhere, 0);
+    // What this GRN already booked is still counted as received until the edit is saved.
+    const bookedByThisGrn = Object.entries(editingItems).reduce(
+      (sum, [itemId, line]) => (isSubVendorPO || itemId === row.item_id ? sum + lineTotal(line) : sum),
+      0,
+    );
+    return Math.max(reported + bookedByThisGrn - claimedElsewhere, 0);
   };
 
   const updateLine = (index: number, patch: Partial<GRNLineForm>) =>
@@ -157,7 +167,33 @@ export default function GRNPage() {
     setLines([]); setDraft(emptyInwardLine()); setError('');
   };
 
-  const openNew = () => { switchType(RAW_MATERIAL); setShowForm(true); };
+  const openNew = () => { setEditingId(null); setEditingItems({}); switchType(RAW_MATERIAL); setShowForm(true); };
+
+  const openEdit = (grn: GRN) => {
+    const booked = grn.items.map((item) => ({
+      item_id: String(item.item_id),
+      label: item.item_name ?? '',
+      ordered_qty: 0,
+      received_qty: String(item.received_qty),
+      damaged_qty: String(item.damaged_qty),
+      short_qty: String(item.short_qty ?? 0),
+      rate: String(item.rate),
+      lr_number: item.lr_number ?? '',
+      po_number: item.po_number ?? '',
+    }));
+    setEditingId(grn.grn_id);
+    setEditingItems(Object.fromEntries(booked.map((line) => [line.item_id, line])));
+    setForm({
+      grn_type: grn.grn_type,
+      po_id: grn.po_id ? String(grn.po_id) : '',
+      contact_id: grn.contact_id ? String(grn.contact_id) : '',
+      vendor_voucher_number: grn.vendor_voucher_number ?? '',
+      remarks: grn.remarks ?? '',
+    });
+    setLines(grn.grn_type === RAW_MATERIAL ? booked : []);
+    setDraft(emptyInwardLine()); setDetail(null); setShowForm(true); setError(''); setSuccess('');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -170,10 +206,11 @@ export default function GRNPage() {
       });
       if (overBooked >= 0) { setError(`${lines[overBooked].label} exceeds the pending quantity on this voucher.`); return; }
     }
-    if (!(await confirm('Save GRN', `Save this GRN with ${received.length} item(s) and post stock movements?`))) return;
+    if (!(await confirm(editingId ? 'Update GRN' : 'Save GRN',
+      `${editingId ? 'Update' : 'Save'} this GRN with ${received.length} item(s) and repost stock movements?`))) return;
     setSaving(true); setError(''); setSuccess('');
     try {
-      const res = await api.post('/grns', {
+      const body = {
         grn_type: form.grn_type,
         po_id: isRawMaterial ? null : Number(form.po_id),
         contact_id: isRawMaterial && form.contact_id ? Number(form.contact_id) : null,
@@ -189,9 +226,10 @@ export default function GRNPage() {
           lr_number: line.lr_number || null,
           po_number: line.po_number || null,
         })),
-      });
-      setSuccess(`GRN ${res.data.grn_number} saved and stock updated.`);
-      setShowForm(false); load();
+      };
+      const res = editingId ? await api.put(`/grns/${editingId}`, body) : await api.post('/grns', body);
+      setSuccess(`GRN ${res.data.grn_number} ${editingId ? 'updated' : 'saved'} and stock updated.`);
+      setShowForm(false); setEditingId(null); setEditingItems({}); load();
     } catch (err: unknown) { setError((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed'); }
     finally { setSaving(false); }
   };
@@ -199,17 +237,26 @@ export default function GRNPage() {
   return (
     <div>
       {dialog}
-      <PageHeader title="Goods Receipt Notes" actions={<button className="btn-primary text-sm" onClick={openNew}>+ Create GRN</button>} />
+      <PageHeader title="Goods Receipt Notes" actions={
+        <div className="flex gap-2">
+          <ExportButtons report="grns" params={{
+            search: search || undefined, grn_type: filterType || undefined,
+            voucher_number: filterVoucher || undefined,
+            date_from: dateFrom || undefined, date_to: dateTo || undefined,
+          }} />
+          <button className="btn-primary text-sm" onClick={openNew}>+ Create GRN</button>
+        </div>
+      } />
       {success && <div className="bg-green-50 text-green-700 text-sm px-4 py-2 rounded-lg mb-4">{success}</div>}
       {error && <div className="bg-red-50 text-red-700 text-sm px-4 py-2 rounded-lg mb-4">{error}</div>}
 
       {showForm && (
         <div className="card p-4 sm:p-6 mb-6">
-          <h3 className="font-semibold mb-4">New GRN</h3>
+          <h3 className="font-semibold mb-4">{editingId ? 'Edit GRN' : 'New GRN'}</h3>
           <form onSubmit={save}>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               <div><label className="label">Inward Type *</label>
-                <select className="input" value={form.grn_type} onChange={(e) => switchType(e.target.value)}>
+                <select className="input" value={form.grn_type} disabled={editingId !== null} onChange={(e) => switchType(e.target.value)}>
                   <option value={RAW_MATERIAL}>Raw Material</option>
                   <option value={SUB_VENDOR_GRN}>Sub Vendor</option>
                 </select>
@@ -224,7 +271,7 @@ export default function GRNPage() {
               ) : (
                 <>
                   <div><label className="label">Voucher *</label>
-                    <select className="input" value={form.po_id} onChange={(e) => { setForm({ ...form, po_id: e.target.value }); setError(''); }} required>
+                    <select className="input" value={form.po_id} disabled={editingId !== null} onChange={(e) => { setForm({ ...form, po_id: e.target.value }); setError(''); }} required>
                       <option value="">Select</option>
                       {openPOs.map((po) => <option key={po.po_id} value={po.po_id}>{po.voucher_number ?? po.po_number} - {po.contact_name}</option>)}
                     </select>
@@ -371,8 +418,10 @@ export default function GRNPage() {
                 {!isRawMaterial && ` | damaged/NC: ${sumBy(lines, (l) => l.damaged_qty)} | short of: ${sumBy(lines, (l) => l.short_qty)}`}
               </span>
               <div className="flex gap-2">
-                <button type="submit" className="btn-primary text-sm" disabled={saving || lines.length === 0}>{saving ? 'Saving...' : 'Save GRN'}</button>
-                <button type="button" className="btn-secondary text-sm" onClick={() => setShowForm(false)}>Cancel</button>
+                <button type="submit" className="btn-primary text-sm" disabled={saving || lines.length === 0}>
+                  {saving ? 'Saving...' : editingId ? 'Update GRN' : 'Save GRN'}
+                </button>
+                <button type="button" className="btn-secondary text-sm" onClick={() => { setShowForm(false); setEditingId(null); setEditingItems({}); }}>Cancel</button>
               </div>
             </div>
           </form>
@@ -406,8 +455,9 @@ export default function GRNPage() {
               { header: 'LR No', accessor: (r) => r.items.map((i) => i.lr_number).filter(Boolean).join(', ') || '-', hideOnMobile: true },
               { header: 'Total Received', accessor: (r) => sumBy(r.items, (i) => i.received_qty) },
               { header: '', accessor: (r) => (
-                <div className="flex justify-end">
+                <div className="flex justify-end gap-3">
                   <button className="text-primary-600 text-xs hover:underline" onClick={(e) => { e.stopPropagation(); setDetail(r); }}>View</button>
+                  <button className="text-primary-600 text-xs hover:underline" onClick={(e) => { e.stopPropagation(); openEdit(r); }}>Edit</button>
                 </div>
               ) },
             ]} />

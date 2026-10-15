@@ -357,3 +357,88 @@ async def test_short_quantity_closes_the_po_without_adding_stock(db: AsyncSessio
     assert await InventoryService(db).current_stock(item.item_id) == 7
     assert await purchase.pending_po_qty(po.po_id) == 0
     assert po.status == "CLOSED"
+
+
+# --- editing a posted voucher or GRN ---
+
+async def test_updating_a_sub_vendor_po_reposts_its_stock_movements(db: AsyncSession):
+    svc, sub_vendor, rm, wip, fg = await _sub_vendor_setup(db)
+    inventory = InventoryService(db)
+    po = await svc.create_po(sub_vendor.contact_id, [
+        PurchaseLine(wip.item_id, 20, Decimal("15"),
+                     stock_out_item_id=rm.item_id, target_fg_item_id=fg.item_id),
+    ], voucher_number="GSS-1")
+
+    await svc.update_po(po.po_id, sub_vendor.contact_id, [
+        PurchaseLine(wip.item_id, 5, Decimal("18"),
+                     stock_out_item_id=rm.item_id, target_fg_item_id=fg.item_id),
+    ], voucher_number="GSS-2")
+
+    assert po.voucher_number == "GSS-2"
+    assert [item.ordered_qty for item in po.items] == [5]
+    assert await inventory.current_stock(rm.item_id) == 95
+    assert await inventory.current_stock(wip.item_id) == 5
+
+
+async def test_a_po_cannot_be_edited_once_received(db: AsyncSession, masters: MasterService,
+                                                   purchase: PurchaseService):
+    contact = await masters.create_contact("V", "Raw Material Vendor")
+    item = await masters.create_item(None, "RM", item_type="RM")
+    await db.flush()
+    po = await purchase.create_po(contact.contact_id, [PurchaseLine(item.item_id, 10, Decimal("5"))])
+    await purchase.receive_grn(po.po_id, [GRNLine(item_id=item.item_id, received_qty=4, rate=Decimal("5"))])
+    with pytest.raises(ValueError, match="already has GRN receipts"):
+        await purchase.update_po(po.po_id, contact.contact_id,
+                                 [PurchaseLine(item.item_id, 3, Decimal("5"))])
+
+
+async def test_updating_a_direct_rm_grn_restates_the_stock(db: AsyncSession, masters: MasterService,
+                                                           purchase: PurchaseService):
+    vendor = await masters.create_contact("Acme", "Raw Material Vendor")
+    item = await masters.create_item(None, "Grey Fabric", item_type="RM")
+    await db.flush()
+    grn = await purchase.receive_direct_grn(vendor.contact_id, [
+        GRNLine(item_id=item.item_id, received_qty=40, rate=Decimal("12.5"), po_number="PO-EXT-9"),
+    ])
+    await purchase.update_grn(grn.grn_id, [
+        GRNLine(item_id=item.item_id, received_qty=25, rate=Decimal("13"), po_number="PO-EXT-9"),
+    ], contact_id=vendor.contact_id)
+
+    assert [i.received_qty for i in grn.items] == [25]
+    assert await InventoryService(db).current_stock(item.item_id) == 25
+
+
+async def test_updating_a_sub_vendor_grn_reopens_the_voucher(db: AsyncSession):
+    svc, sub_vendor, rm, wip, fg = await _sub_vendor_setup(db)
+    inventory = InventoryService(db)
+    po = await svc.create_po(sub_vendor.contact_id, [
+        PurchaseLine(wip.item_id, 20, Decimal("15"),
+                     stock_out_item_id=rm.item_id, target_fg_item_id=fg.item_id),
+    ])
+    grn = await svc.receive_grn(po.po_id, [GRNLine(item_id=fg.item_id, received_qty=20, rate=Decimal("15"))])
+    assert po.status == "CLOSED"
+
+    await svc.update_grn(grn.grn_id, [GRNLine(item_id=fg.item_id, received_qty=8, rate=Decimal("15"))])
+
+    assert await inventory.current_stock(fg.item_id) == 8
+    assert await inventory.current_stock(wip.item_id) == 12
+    assert await svc.pending_po_qty(po.po_id) == 12
+    assert po.status == "PARTIAL"
+
+
+async def test_a_grn_edit_cannot_push_stock_negative(db: AsyncSession, masters: MasterService,
+                                                     purchase: PurchaseService):
+    vendor = await masters.create_contact("Acme", "Raw Material Vendor")
+    item = await masters.create_item(None, "Grey Fabric", item_type="RM")
+    await db.flush()
+    grn = await purchase.receive_direct_grn(vendor.contact_id, [
+        GRNLine(item_id=item.item_id, received_qty=40, rate=Decimal("10"), po_number="PO-EXT-1"),
+    ])
+    await InventoryService(db).post_ledger(
+        transaction_date=date.today(), transaction_type="CUSTOMER_ISSUE",
+        reference_no="CUST-1", item_id=item.item_id, qty_out=35,
+    )
+    with pytest.raises(ValueError, match="below zero"):
+        await purchase.update_grn(grn.grn_id, [
+            GRNLine(item_id=item.item_id, received_qty=10, rate=Decimal("10"), po_number="PO-EXT-1"),
+        ], contact_id=vendor.contact_id)

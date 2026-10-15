@@ -13,6 +13,24 @@ from app.services.purchase_service import GRNLine, PurchaseService
 router = APIRouter(prefix="/grns", tags=["GRN"])
 
 
+def _grn_lines(body: GRNCreate) -> list[GRNLine]:
+    return [GRNLine(
+        item_id=item.item_id, received_qty=item.received_qty, damaged_qty=item.damaged_qty,
+        rate=item.rate, lr_number=item.lr_number, short_qty=item.short_qty, po_number=item.po_number,
+    ) for item in body.items]
+
+
+async def _reload_grn(db: AsyncSession, grn_id: int):
+    from sqlalchemy.orm import selectinload
+    from app.models.grn import GRN, GRNItem
+    from app.models.purchase_order import PurchaseOrder
+    return await db.get(GRN, grn_id, populate_existing=True, options=[
+        selectinload(GRN.purchase_order).selectinload(PurchaseOrder.contact),
+        selectinload(GRN.contact),
+        selectinload(GRN.items).selectinload(GRNItem.item),
+    ])
+
+
 def _grn_to_response(grn) -> GRNResponse:
     items = [GRNItemResponse(
         grn_item_id=item.grn_item_id, item_id=item.item_id,
@@ -54,10 +72,7 @@ async def list_grns(
 @router.post("", response_model=GRNResponse, status_code=201)
 async def create_grn(body: GRNCreate, db: AsyncSession = Depends(get_db), _user=Depends(get_current_user)):
     try:
-        lines = [GRNLine(
-            item_id=item.item_id, received_qty=item.received_qty, damaged_qty=item.damaged_qty,
-            rate=item.rate, lr_number=item.lr_number, short_qty=item.short_qty, po_number=item.po_number,
-        ) for item in body.items]
+        lines = _grn_lines(body)
         service = PurchaseService(db)
         if body.grn_type == GRN_TYPE_RAW_MATERIAL:
             grn = await service.receive_direct_grn(body.contact_id, lines, body.grn_date, body.remarks)
@@ -67,14 +82,18 @@ async def create_grn(body: GRNCreate, db: AsyncSession = Depends(get_db), _user=
             grn = await service.receive_grn(
                 body.po_id, lines, body.grn_date, body.remarks, body.vendor_voucher_number,
             )
-        from sqlalchemy.orm import selectinload
-        from app.models.grn import GRN, GRNItem
-        from app.models.purchase_order import PurchaseOrder
-        grn = await db.get(GRN, grn.grn_id, populate_existing=True, options=[
-            selectinload(GRN.purchase_order).selectinload(PurchaseOrder.contact),
-            selectinload(GRN.contact),
-            selectinload(GRN.items).selectinload(GRNItem.item),
-        ])
-        return _grn_to_response(grn)
+        return _grn_to_response(await _reload_grn(db, grn.grn_id))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.put("/{grn_id}", response_model=GRNResponse)
+async def update_grn(grn_id: int, body: GRNCreate, db: AsyncSession = Depends(get_db), _user=Depends(get_current_user)):
+    try:
+        grn = await PurchaseService(db).update_grn(
+            grn_id, _grn_lines(body), body.grn_date, body.remarks,
+            body.vendor_voucher_number, body.contact_id,
+        )
+        return _grn_to_response(await _reload_grn(db, grn.grn_id))
     except ValueError as e:
         raise HTTPException(400, str(e))

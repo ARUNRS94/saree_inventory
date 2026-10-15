@@ -140,6 +140,39 @@ alembic downgrade -1                      # roll back one
 
 Migrations use `batch_alter_table`, so they apply cleanly on both PostgreSQL and SQLite.
 
+### Clearing the data (Supabase / PostgreSQL)
+
+Run in the Supabase SQL editor. Wipes transactions and masters but keeps sign-in and access control
+(`users`, `user_identities`, `roles`, `permissions`, `role_permissions`) and `company_settings`.
+`RESTART IDENTITY` sends the id sequences back to 1; `CASCADE` only reaches the listed tables, as
+nothing outside them has a foreign key into them.
+
+```sql
+TRUNCATE TABLE
+  grn_items, grns,
+  purchase_order_items, purchase_orders,
+  job_work_receipt_items, job_work_receipts,
+  job_work_issue_items, job_work_issues,
+  stock_ledger,
+  vendor_process_types, items, contacts, vendors
+RESTART IDENTITY CASCADE;
+```
+
+To keep the masters and clear only the transactions, drop the last line of table names:
+
+```sql
+TRUNCATE TABLE
+  grn_items, grns,
+  purchase_order_items, purchase_orders,
+  job_work_receipt_items, job_work_receipts,
+  job_work_issue_items, job_work_issues,
+  stock_ledger
+RESTART IDENTITY CASCADE;
+```
+
+Document numbers (`PO-2026-0001`, `GRN-2026-0001`) are derived from the rows that exist, so they
+restart on their own.
+
 ---
 
 ## Access control

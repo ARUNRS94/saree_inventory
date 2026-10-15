@@ -3,6 +3,7 @@ import api from '@/services/api';
 import type { PurchaseOrder, Contact, Item, PaginatedResponse } from '@/types';
 import { PageHeader } from '@/components/PageHeader';
 import { FilterBar } from '@/components/FilterBar';
+import { ExportButtons } from '@/components/ExportButtons';
 import { DataTable, Pagination } from '@/components/DataTable';
 import { StatusBadge } from '@/components/StatusBadge';
 import { LoadingState, EmptyState } from '@/components/LoadingState';
@@ -44,6 +45,9 @@ export default function PurchaseOrdersPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [detail, setDetail] = useState<PurchaseOrder | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  // Quantities this voucher already issued stay in the ledger while it is being edited.
+  const [issuedWhenOpened, setIssuedWhenOpened] = useState<Record<string, number>>({});
   const [stockOutAvailable, setStockOutAvailable] = useState<number | null>(null);
   const { confirm, dialog } = useConfirmDialog();
 
@@ -76,7 +80,31 @@ export default function PurchaseOrdersPage() {
     return () => { cancelled = true; };
   }, [draft.stock_out_item_id]);
 
-  const openNew = () => { setForm({ contact_id: '', voucher_number: '', remarks: '' }); setDraft(emptyLine()); setLines([]); setShowForm(true); setError(''); };
+  const openNew = () => {
+    setEditingId(null); setIssuedWhenOpened({});
+    setForm({ contact_id: '', voucher_number: '', remarks: '' });
+    setDraft(emptyLine()); setLines([]); setShowForm(true); setError('');
+  };
+
+  const openEdit = (po: PurchaseOrder) => {
+    setEditingId(po.po_id);
+    setForm({ contact_id: String(po.contact_id), voucher_number: po.voucher_number ?? '', remarks: po.remarks ?? '' });
+    const existing = po.items.map((item) => ({
+      item_id: String(item.item_id),
+      stock_out_item_id: item.stock_out_item_id ? String(item.stock_out_item_id) : '',
+      target_fg_item_id: item.target_fg_item_id ? String(item.target_fg_item_id) : '',
+      quantity: String(item.ordered_qty),
+      rate: String(item.rate),
+      lr_number: item.lr_number ?? '',
+    }));
+    setLines(existing);
+    setIssuedWhenOpened(existing.reduce<Record<string, number>>((totals, line) => {
+      if (line.stock_out_item_id) totals[line.stock_out_item_id] = (totals[line.stock_out_item_id] || 0) + Number(line.quantity || 0);
+      return totals;
+    }, {}));
+    setDraft(emptyLine()); setShowForm(true); setError(''); setSuccess('');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   const itemLabel = (id: string) => {
     const match = allItems.find((s) => s.item_id === Number(id));
@@ -114,7 +142,11 @@ export default function PurchaseOrdersPage() {
     e.preventDefault();
     if (!form.voucher_number.trim()) { setError('Enter the GSS Voucher No.'); return; }
     if (lines.length === 0) { setError('Add at least one item to the voucher.'); return; }
-    if (!(await confirm('Create Voucher', `Create this voucher with ${lines.length} item(s) and post stock movements?`))) return;
+    const editing = editingId !== null;
+    const confirmed = editing
+      ? await confirm('Update Voucher', `Update this voucher with ${lines.length} item(s)? Its stock movements are reposted.`)
+      : await confirm('Create Voucher', `Create this voucher with ${lines.length} item(s) and post stock movements?`);
+    if (!confirmed) return;
     setSaving(true); setError(''); setSuccess('');
     try {
       const body = {
@@ -130,9 +162,11 @@ export default function PurchaseOrdersPage() {
           lr_number: line.lr_number || null,
         })),
       };
-      const res = await api.post('/purchase-orders', body);
-      setSuccess(`Voucher ${res.data.voucher_number ?? res.data.po_number} created.`);
-      setShowForm(false); load();
+      const res = editing
+        ? await api.put(`/purchase-orders/${editingId}`, body)
+        : await api.post('/purchase-orders', body);
+      setSuccess(`Voucher ${res.data.voucher_number ?? res.data.po_number} ${editing ? 'updated' : 'created'}.`);
+      setShowForm(false); setEditingId(null); setIssuedWhenOpened({}); load();
     } catch (err: unknown) { setError((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed'); }
     finally { setSaving(false); }
   };
@@ -149,21 +183,32 @@ export default function PurchaseOrdersPage() {
   const rmfgItems = allItems.filter((s) => s.item_type === 'RM' || s.item_type === 'FG');
 
   // Rows already on the voucher will draw on the same balance when it is saved.
-  const stockOutRemaining = stockOutAvailable === null ? null : stockOutAvailable - lines.reduce(
-    (sum, line) => (line.stock_out_item_id === draft.stock_out_item_id ? sum + Number(line.quantity || 0) : sum),
-    0,
-  );
+  const stockOutRemaining = stockOutAvailable === null ? null : stockOutAvailable
+    + (issuedWhenOpened[draft.stock_out_item_id] || 0)
+    - lines.reduce(
+      (sum, line) => (line.stock_out_item_id === draft.stock_out_item_id ? sum + Number(line.quantity || 0) : sum),
+      0,
+    );
 
   return (
     <div>
       {dialog}
-      <PageHeader title="Voucher" actions={<button className="btn-primary text-sm" onClick={openNew}>+ Create Voucher</button>} />
+      <PageHeader title="Voucher" actions={
+        <div className="flex gap-2">
+          <ExportButtons report="vouchers" params={{
+            search: search || undefined, status: filterStatus || undefined,
+            contact_id: filterContact || undefined,
+            date_from: dateFrom || undefined, date_to: dateTo || undefined,
+          }} />
+          <button className="btn-primary text-sm" onClick={openNew}>+ Create Voucher</button>
+        </div>
+      } />
       {success && <div className="bg-green-50 text-green-700 text-sm px-4 py-2 rounded-lg mb-4">{success}</div>}
       {error && <div className="bg-red-50 text-red-700 text-sm px-4 py-2 rounded-lg mb-4">{error}</div>}
 
       {showForm && (
         <div className="card p-4 sm:p-6 mb-6">
-          <h3 className="font-semibold mb-4">New Voucher</h3>
+          <h3 className="font-semibold mb-4">{editingId ? 'Edit Voucher' : 'New Voucher'}</h3>
           <form onSubmit={save}>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               <div><label className="label">GSS Voucher No *</label>
@@ -264,8 +309,10 @@ export default function PurchaseOrdersPage() {
             <div className="mt-4 flex flex-wrap items-center gap-4">
               <span className="text-sm font-medium">Total: {formatCurrency(totalAmount)}</span>
               <div className="flex gap-2">
-                <button type="submit" className="btn-primary text-sm" disabled={saving || lines.length === 0}>{saving ? 'Creating...' : 'Create Voucher'}</button>
-                <button type="button" className="btn-secondary text-sm" onClick={() => setShowForm(false)}>Cancel</button>
+                <button type="submit" className="btn-primary text-sm" disabled={saving || lines.length === 0}>
+                  {saving ? 'Saving...' : editingId ? 'Update Voucher' : 'Create Voucher'}
+                </button>
+                <button type="button" className="btn-secondary text-sm" onClick={() => { setShowForm(false); setEditingId(null); setIssuedWhenOpened({}); }}>Cancel</button>
               </div>
             </div>
           </form>
@@ -301,6 +348,9 @@ export default function PurchaseOrdersPage() {
               { header: '', accessor: (r) => (
                 <div className="flex justify-end gap-3">
                   <button className="text-primary-600 text-xs hover:underline" onClick={(e) => { e.stopPropagation(); setDetail(r); }}>View</button>
+                  {r.status === 'OPEN' && (
+                    <button className="text-primary-600 text-xs hover:underline" onClick={(e) => { e.stopPropagation(); openEdit(r); }}>Edit</button>
+                  )}
                   {r.status !== 'CANCELLED' && r.status !== 'CLOSED' && (
                     <button className="text-red-600 text-xs hover:underline" onClick={(e) => { e.stopPropagation(); cancelPO(r); }}>Cancel</button>
                   )}

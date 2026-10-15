@@ -3,12 +3,13 @@ import api from '@/services/api';
 import type { StockSummary, StockValuation, StockLedgerEntry, PaginatedResponse } from '@/types';
 import { PageHeader } from '@/components/PageHeader';
 import { FilterBar } from '@/components/FilterBar';
+import { ExportButtons } from '@/components/ExportButtons';
 import { DataTable } from '@/components/DataTable';
 import { StatsCard } from '@/components/StatsCard';
 import { LoadingState, EmptyState } from '@/components/LoadingState';
 import { formatCurrency, formatDate, formatNumber, sumBy } from '@/utils/format';
 import { ITEM_TYPE_OPTIONS, itemTypeLabel } from '@/utils/itemTypes';
-import { Download, Package, IndianRupee, ArrowLeftRight } from 'lucide-react';
+import { Package, IndianRupee, ArrowLeftRight } from 'lucide-react';
 
 type Tab = 'stock' | 'valuation' | 'movement';
 
@@ -66,16 +67,6 @@ export default function ReportsPage() {
     }
   }, [tab, params]);
 
-  const download = (format: 'csv' | 'pdf') => {
-    api.get(`/reports/${tab}/${format}`, { params, responseType: 'blob' }).then((r) => {
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(r.data);
-      a.download = `${tab}_report.${format}`;
-      a.click();
-      URL.revokeObjectURL(a.href);
-    });
-  };
-
   const clearFilters = () => {
     setSearch(''); setItemType(''); setVendor(''); setHideZero(false);
     setVoucherNumber(''); setVendorVoucherNumber('');
@@ -104,12 +95,7 @@ export default function ReportsPage() {
 
   return (
     <div>
-      <PageHeader title="Reports" actions={
-        <div className="flex gap-2">
-          <button className="btn-secondary text-sm flex items-center gap-1" onClick={() => download('csv')}><Download className="h-4 w-4" /> CSV</button>
-          <button className="btn-secondary text-sm flex items-center gap-1" onClick={() => download('pdf')}><Download className="h-4 w-4" /> PDF</button>
-        </div>
-      } />
+      <PageHeader title="Reports" actions={<ExportButtons report={tab} params={params} />} />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
         {cards.map((c) => <StatsCard key={c.title} title={c.title} value={c.value} icon={c.icon} />)}
@@ -198,13 +184,15 @@ export default function ReportsPage() {
                 { header: 'Date', accessor: (r) => formatDate(r.transaction_date) },
                 { header: 'Type', accessor: (r) => r.transaction_type.replace(/_/g, ' ') },
                 { header: 'Reference', accessor: 'reference_no', hideOnMobile: true },
+                { header: 'Vendor', accessor: (r) => r.vendor_name || '-', hideOnMobile: true },
                 { header: 'Item', accessor: 'item_name' },
                 { header: 'In', accessor: 'qty_in' },
                 { header: 'Out', accessor: 'qty_out' },
                 { header: 'Rate', accessor: (r) => formatCurrency(r.rate), hideOnMobile: true },
+                { header: 'Amount', accessor: (r) => formatCurrency(r.amount), className: 'font-semibold' },
               ]} />
               <div className="px-4 py-3 border-t border-gray-100 text-right font-semibold">
-                {movement.length} movement(s) | net {formatNumber(netMovement)} pcs
+                {movement.length} movement(s) | net {formatNumber(netMovement)} pcs | total {formatCurrency(sumBy(movement, (r) => r.amount))}
               </div>
             </>
           )

@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.inventory_service import InventoryService
 from app.services.master_service import MasterService
-from app.services.purchase_service import PurchaseLine, PurchaseService
+from app.services.purchase_service import GRNLine, PurchaseLine, PurchaseService
 
 
 # --- ledger guards ---
@@ -147,3 +147,24 @@ async def test_stock_report_lists_every_item_including_empty_ones(db: AsyncSessi
     assert by_code["RM100"]["current_stock"] == 100
     assert by_code["EMPTY1"]["current_stock"] == 0
     assert by_code["EMPTY1"]["item_type"] == "FG"
+
+
+# --- stock movements carry their vendor ---
+
+async def test_movements_name_the_vendor_and_can_be_searched_by_it(db: AsyncSession,
+                                                                   masters: MasterService,
+                                                                   purchase: PurchaseService):
+    vendor = await masters.create_contact("Bharat Textiles", "Raw Material Vendor")
+    item = await masters.create_item("RM9", "Grey Fabric", item_type="RM")
+    await db.flush()
+    await purchase.receive_direct_grn(vendor.contact_id, [
+        GRNLine(item_id=item.item_id, received_qty=10, rate=Decimal("20"), po_number="PO-EXT-1"),
+    ])
+    await db.flush()
+
+    inventory = InventoryService(db)
+    rows = await inventory.movement_report(search="bharat")
+    assert [r["vendor_name"] for r in rows] == ["Bharat Textiles"]
+    assert rows[0]["amount"] == Decimal("200")
+    assert await inventory.ledger_total_amount(search="bharat") == Decimal("200")
+    assert await inventory.movement_report(search="no such vendor") == []
