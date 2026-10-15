@@ -46,6 +46,7 @@ export default function PurchaseOrdersPage() {
   const [success, setSuccess] = useState('');
   const [detail, setDetail] = useState<PurchaseOrder | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingStatus, setEditingStatus] = useState<string | null>(null);
   // Quantities this voucher already issued stay in the ledger while it is being edited.
   const [issuedWhenOpened, setIssuedWhenOpened] = useState<Record<string, number>>({});
   const [stockOutAvailable, setStockOutAvailable] = useState<number | null>(null);
@@ -81,13 +82,14 @@ export default function PurchaseOrdersPage() {
   }, [draft.stock_out_item_id]);
 
   const openNew = () => {
-    setEditingId(null); setIssuedWhenOpened({});
+    setEditingId(null); setEditingStatus(null); setIssuedWhenOpened({});
     setForm({ contact_id: '', voucher_number: '', remarks: '' });
     setDraft(emptyLine()); setLines([]); setShowForm(true); setError('');
   };
 
   const openEdit = (po: PurchaseOrder) => {
     setEditingId(po.po_id);
+    setEditingStatus(po.status);
     setForm({ contact_id: String(po.contact_id), voucher_number: po.voucher_number ?? '', remarks: po.remarks ?? '' });
     const existing = po.items.map((item) => ({
       item_id: String(item.item_id),
@@ -166,7 +168,7 @@ export default function PurchaseOrdersPage() {
         ? await api.put(`/purchase-orders/${editingId}`, body)
         : await api.post('/purchase-orders', body);
       setSuccess(`Voucher ${res.data.voucher_number ?? res.data.po_number} ${editing ? 'updated' : 'created'}.`);
-      setShowForm(false); setEditingId(null); setIssuedWhenOpened({}); load();
+      setShowForm(false); setEditingId(null); setEditingStatus(null); setIssuedWhenOpened({}); load();
     } catch (err: unknown) { setError((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed'); }
     finally { setSaving(false); }
   };
@@ -216,10 +218,13 @@ export default function PurchaseOrdersPage() {
                   onChange={(e) => setForm({ ...form, voucher_number: e.target.value })} required />
               </div>
               <div><label className="label">Sub Vendor *</label>
-                <select className="input" value={form.contact_id} onChange={(e) => { setForm({ ...form, contact_id: e.target.value }); setDraft(emptyLine()); setLines([]); }} required>
+                <select className="input" value={form.contact_id} disabled={editingStatus === 'PARTIAL'} onChange={(e) => { setForm({ ...form, contact_id: e.target.value }); setDraft(emptyLine()); setLines([]); }} required>
                   <option value="">Select</option>
                   {contacts.map((s) => <option key={s.contact_id} value={s.contact_id}>{s.contact_name}</option>)}
                 </select>
+                {editingStatus === 'PARTIAL' && (
+                  <p className="text-xs text-gray-500 mt-1">Partly received: quantities cannot drop below what is already in.</p>
+                )}
               </div>
               <div><label className="label">Remarks (applies to whole voucher)</label>
                 <input className="input" value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })} />
@@ -312,7 +317,7 @@ export default function PurchaseOrdersPage() {
                 <button type="submit" className="btn-primary text-sm" disabled={saving || lines.length === 0}>
                   {saving ? 'Saving...' : editingId ? 'Update Voucher' : 'Create Voucher'}
                 </button>
-                <button type="button" className="btn-secondary text-sm" onClick={() => { setShowForm(false); setEditingId(null); setIssuedWhenOpened({}); }}>Cancel</button>
+                <button type="button" className="btn-secondary text-sm" onClick={() => { setShowForm(false); setEditingId(null); setEditingStatus(null); setIssuedWhenOpened({}); }}>Cancel</button>
               </div>
             </div>
           </form>
@@ -348,7 +353,7 @@ export default function PurchaseOrdersPage() {
               { header: '', accessor: (r) => (
                 <div className="flex justify-end gap-3">
                   <button className="text-primary-600 text-xs hover:underline" onClick={(e) => { e.stopPropagation(); setDetail(r); }}>View</button>
-                  {r.status === 'OPEN' && (
+                  {(r.status === 'OPEN' || r.status === 'PARTIAL') && (
                     <button className="text-primary-600 text-xs hover:underline" onClick={(e) => { e.stopPropagation(); openEdit(r); }}>Edit</button>
                   )}
                   {r.status !== 'CANCELLED' && r.status !== 'CLOSED' && (

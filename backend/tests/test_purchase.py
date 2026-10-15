@@ -380,16 +380,66 @@ async def test_updating_a_sub_vendor_po_reposts_its_stock_movements(db: AsyncSes
     assert await inventory.current_stock(wip.item_id) == 5
 
 
-async def test_a_po_cannot_be_edited_once_received(db: AsyncSession, masters: MasterService,
-                                                   purchase: PurchaseService):
+async def test_a_partly_received_po_cannot_be_cut_below_what_arrived(db: AsyncSession,
+                                                                     masters: MasterService,
+                                                                     purchase: PurchaseService):
     contact = await masters.create_contact("V", "Raw Material Vendor")
     item = await masters.create_item(None, "RM", item_type="RM")
     await db.flush()
     po = await purchase.create_po(contact.contact_id, [PurchaseLine(item.item_id, 10, Decimal("5"))])
     await purchase.receive_grn(po.po_id, [GRNLine(item_id=item.item_id, received_qty=4, rate=Decimal("5"))])
-    with pytest.raises(ValueError, match="already has GRN receipts"):
+    with pytest.raises(ValueError, match="cannot drop below"):
         await purchase.update_po(po.po_id, contact.contact_id,
                                  [PurchaseLine(item.item_id, 3, Decimal("5"))])
+
+
+async def test_a_partly_received_po_can_be_edited_down_to_the_received_quantity(db: AsyncSession,
+                                                                                masters: MasterService,
+                                                                                purchase: PurchaseService):
+    contact = await masters.create_contact("V", "Raw Material Vendor")
+    item = await masters.create_item(None, "RM", item_type="RM")
+    await db.flush()
+    po = await purchase.create_po(contact.contact_id, [PurchaseLine(item.item_id, 10, Decimal("5"))])
+    await purchase.receive_grn(po.po_id, [GRNLine(item_id=item.item_id, received_qty=4, rate=Decimal("5"))])
+
+    await purchase.update_po(po.po_id, contact.contact_id, [PurchaseLine(item.item_id, 6, Decimal("7"))])
+
+    assert [(i.ordered_qty, i.rate) for i in po.items] == [(6, Decimal("7"))]
+    assert await purchase.pending_po_qty(po.po_id) == 2
+    assert po.status == "PARTIAL"
+
+
+async def test_a_partly_received_po_keeps_its_vendor(db: AsyncSession, masters: MasterService,
+                                                     purchase: PurchaseService):
+    contact = await masters.create_contact("V", "Raw Material Vendor")
+    other = await masters.create_contact("Other", "Raw Material Vendor")
+    item = await masters.create_item(None, "RM", item_type="RM")
+    await db.flush()
+    po = await purchase.create_po(contact.contact_id, [PurchaseLine(item.item_id, 10, Decimal("5"))])
+    await purchase.receive_grn(po.po_id, [GRNLine(item_id=item.item_id, received_qty=4, rate=Decimal("5"))])
+    with pytest.raises(ValueError, match="vendor cannot be changed"):
+        await purchase.update_po(po.po_id, other.contact_id,
+                                 [PurchaseLine(item.item_id, 10, Decimal("5"))])
+
+
+async def test_a_partly_received_sub_vendor_po_reissues_only_the_difference(db: AsyncSession):
+    svc, sub_vendor, rm, wip, fg = await _sub_vendor_setup(db)
+    inventory = InventoryService(db)
+    po = await svc.create_po(sub_vendor.contact_id, [
+        PurchaseLine(wip.item_id, 20, Decimal("15"),
+                     stock_out_item_id=rm.item_id, target_fg_item_id=fg.item_id),
+    ])
+    await svc.receive_grn(po.po_id, [GRNLine(item_id=fg.item_id, received_qty=12, rate=Decimal("15"))])
+
+    await svc.update_po(po.po_id, sub_vendor.contact_id, [
+        PurchaseLine(wip.item_id, 15, Decimal("15"),
+                     stock_out_item_id=rm.item_id, target_fg_item_id=fg.item_id),
+    ])
+
+    assert await inventory.current_stock(rm.item_id) == 85
+    assert await inventory.current_stock(wip.item_id) == 3
+    assert await svc.pending_po_qty(po.po_id) == 3
+    assert po.status == "PARTIAL"
 
 
 async def test_updating_a_direct_rm_grn_restates_the_stock(db: AsyncSession, masters: MasterService,

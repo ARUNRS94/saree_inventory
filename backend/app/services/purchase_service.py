@@ -84,12 +84,16 @@ class PurchaseService:
             raise ValueError("Purchase order not found.")
         if po.status == "CANCELLED":
             raise ValueError("A cancelled voucher can no longer be edited.")
-        if await self._accounted_qty(po.po_id) > 0:
-            raise ValueError("This voucher already has GRN receipts against it, so it can no longer be edited.")
         if not lines:
             raise ValueError("Purchase order requires at least one item line.")
+        received = await self._accounted_qty(po.po_id)
+        if received > 0 and contact_id != po.contact_id:
+            raise ValueError("The vendor cannot be changed once receipts exist against this voucher.")
         contact = await self._purchase_contact(contact_id)
+        if received > 0:
+            await self._assert_covers_receipts(po, contact, lines)
 
+        touched_items = self._po_line_items(po.items) | self._po_line_items(lines)
         await self._withdraw_ledger(po.po_number, PO_LEDGER_TYPES)
         po.items.clear()
         await self.session.flush()
@@ -101,10 +105,40 @@ class PurchaseService:
         po.po_date = document_date
         po.expected_date = expected_date
         po.remarks = remarks
-        po.status = "OPEN"
         await self._apply_po_lines(po, contact, lines, document_date, remarks)
         await self.session.flush()
+        await self._update_po_status(po)
+        for item_id in touched_items:
+            if await self.inventory.current_stock(item_id) < 0:
+                raise ValueError("This change would push stock below zero. Reverse the later movements first.")
         return po
+
+    @staticmethod
+    def _po_line_items(lines) -> set[int]:
+        """Every item a set of voucher lines moves, whether it is stocked in or out."""
+        items = set()
+        for line in lines:
+            items.add(getattr(line, "item_id"))
+            stock_out_id = getattr(line, "stock_out_item_id", None)
+            if stock_out_id:
+                items.add(stock_out_id)
+        return items
+
+    async def _assert_covers_receipts(self, po: PurchaseOrder, contact: Contact,
+                                      lines: list[PurchaseLine]) -> None:
+        """A partly received voucher cannot be cut below what the vendor has already delivered."""
+        if contact.contact_type == SUB_VENDOR:
+            pairs = [(None, sum(line.quantity for line in lines))]
+        else:
+            item_ids = {line.item_id for line in lines} | {item.item_id for item in po.items}
+            pairs = [(item_id, sum(line.quantity for line in lines if line.item_id == item_id))
+                     for item_id in item_ids]
+        for item_id, ordered in pairs:
+            accounted = await self._accounted_qty(po.po_id, item_id)
+            if ordered < accounted:
+                raise ValueError(
+                    f"{accounted} already received against this voucher, so the quantity cannot drop below it."
+                )
 
     async def _purchase_contact(self, contact_id: int) -> Contact:
         contact = await self.session.get(Contact, contact_id)
