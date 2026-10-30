@@ -15,6 +15,7 @@ class PurchaseLineCreate(BaseModel):
     stock_out_item_id: int | None = None
     target_fg_item_id: int | None = None
     lr_number: str | None = Field(default=None, max_length=50)
+    bill_number: str | None = Field(default=None, max_length=50)
 
 
 class PurchaseOrderCreate(BaseModel):
@@ -45,6 +46,7 @@ class POItemResponse(BaseModel):
     rate: Money
     amount: Money
     lr_number: str | None = None
+    bill_number: str | None = None
 
     model_config = {"from_attributes": True}
 

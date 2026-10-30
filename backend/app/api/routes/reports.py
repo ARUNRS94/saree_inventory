@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import csv
 import io
 from dataclasses import dataclass
@@ -21,6 +22,9 @@ router = APIRouter(prefix="/reports", tags=["Reports"])
 
 # Document exports are rendered in one pass, so the row count is bounded.
 DOCUMENT_EXPORT_LIMIT = 1_000
+# A letterhead logo; anything larger is ignored rather than embedded.
+MAX_LOGO_BYTES = 2 * 1024 * 1024
+LOGO_HEIGHT = 42
 
 
 @dataclass(frozen=True)
@@ -68,9 +72,73 @@ def _money(value: Decimal | float | int) -> str:
     return f"{Decimal(str(value)):.2f}"
 
 
-async def _company_name(db: AsyncSession) -> str:
-    name = await db.scalar(select(CompanySettings.value).where(CompanySettings.key == "company_name"))
-    return (name or "").strip()
+async def _company_header(db: AsyncSession) -> dict[str, str]:
+    """Letterhead details, as saved under Settings."""
+    wanted = ("company_name", "company_address", "company_phone", "logo_url")
+    rows = await db.execute(select(CompanySettings.key, CompanySettings.value)
+                            .where(CompanySettings.key.in_(wanted)))
+    saved = {key: (value or "").strip() for key, value in rows}
+    return {key: saved.get(key, "") for key in wanted}
+
+
+def _logo_bytes(logo_url: str) -> bytes | None:
+    """A data: logo is decoded inline; an http(s) one is fetched once and never blocks the report."""
+    try:
+        if logo_url.startswith("data:image/"):
+            _, _, encoded = logo_url.partition(",")
+            data = base64.b64decode(encoded, validate=False)
+        elif logo_url.startswith(("http://", "https://")):
+            import requests
+
+            response = requests.get(logo_url, timeout=5)
+            response.raise_for_status()
+            if not response.headers.get("content-type", "").startswith("image/"):
+                return None
+            data = response.content
+        else:
+            return None
+    except Exception:
+        return None
+    return data if 0 < len(data) <= MAX_LOGO_BYTES else None
+
+
+def _letterhead(company: dict[str, str], title: str, styles) -> list:
+    """Logo beside the company name, address and phone, then the report title."""
+    from reportlab.platypus import Image, Paragraph, Table, TableStyle
+
+    named = bool(company["company_name"])
+    details = []
+    if named:
+        details.append(Paragraph(company["company_name"], styles["Title"]))
+    if company["company_address"]:
+        details.append(Paragraph(company["company_address"].replace("\n", "<br/>"), styles["Normal"]))
+    if company["company_phone"]:
+        details.append(Paragraph(f"Phone: {company['company_phone']}", styles["Normal"]))
+
+    logo = None
+    data = _logo_bytes(company["logo_url"]) if company["logo_url"] else None
+    if data:
+        try:
+            logo = Image(io.BytesIO(data))
+            logo.drawHeight = LOGO_HEIGHT
+            logo.drawWidth = min(LOGO_HEIGHT * (logo.imageWidth / logo.imageHeight), 140)
+        except Exception:
+            logo = None
+
+    if logo is not None and details:
+        header = Table([[logo, details]], colWidths=[logo.drawWidth + 14, None])
+        header.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ]))
+        flow = [header]
+    elif logo is not None:
+        flow = [logo]
+    else:
+        flow = details
+    flow.append(Paragraph(title, styles["Heading2"] if named else styles["Title"]))
+    return flow
 
 
 async def _build(db: AsyncSession, report: str, f: ReportFilters) -> tuple[str, list[str], list[list[str]]]:
@@ -108,14 +176,15 @@ async def _build(db: AsyncSession, report: str, f: ReportFilters) -> tuple[str, 
             f.status, f.contact_id, f.search, f.date_from, f.date_to, 1, DOCUMENT_EXPORT_LIMIT,
         )
         headers = ["GSS Voucher No", "Voucher Ref", "Date", "Sub Vendor", "Status", "Stock In Item",
-                   "Stock Out Item", "Target FG Item", "Qty", "Rate", "Amount", "LR No"]
+                   "Stock Out Item", "Target FG Item", "Qty", "Rate", "Amount", "LR No", "Bill No"]
         body = [
             [po.voucher_number or "-", po.po_number, po.po_date.isoformat(),
              po.contact.contact_name if po.contact else "-", po.status,
              item.item.item_name if item.item else "-",
              item.stock_out_item.item_name if item.stock_out_item else "-",
              item.target_fg_item.item_name if item.target_fg_item else "-",
-             str(item.ordered_qty), _money(item.rate), _money(item.amount), item.lr_number or "-"]
+             str(item.ordered_qty), _money(item.rate), _money(item.amount),
+             item.lr_number or "-", item.bill_number or "-"]
             for po in pos for item in po.items
         ]
         return "voucher_report", headers, body
@@ -167,11 +236,13 @@ async def report_csv(
     db: AsyncSession = Depends(get_db), _user=Depends(get_current_user),
 ):
     stem, headers, body = await _build(db, report, filters)
-    company = await _company_name(db)
+    company = await _company_header(db)
     buffer = io.StringIO()
     writer = csv.writer(buffer)
-    if company:
-        writer.writerow([company])
+    for value in (company["company_name"], company["company_address"].replace("\n", ", "),
+                  f"Phone: {company['company_phone']}" if company["company_phone"] else ""):
+        if value:
+            writer.writerow([value])
     writer.writerow([stem.replace("_", " ").title(), f"Generated {date.today():%d %b %Y}"])
     summary = _filter_summary(filters)
     if summary:
@@ -197,14 +268,12 @@ async def report_pdf(
     from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
     stem, headers, body = await _build(db, report, filters)
-    company = await _company_name(db)
+    company = await _company_header(db)
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), title=stem)
     styles = getSampleStyleSheet()
 
-    title = stem.replace("_", " ").title()
-    flow = [Paragraph(company, styles["Title"]), Paragraph(title, styles["Heading2"])] if company \
-        else [Paragraph(title, styles["Title"])]
+    flow = _letterhead(company, stem.replace("_", " ").title(), styles)
     flow.append(Paragraph(f"Generated {date.today():%d %b %Y} | {len(body)} row(s)", styles["Normal"]))
     summary = _filter_summary(filters)
     if summary:

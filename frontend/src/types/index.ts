@@ -101,6 +101,7 @@ export interface POItem {
   rate: number;
   amount: number;
   lr_number: string | null;
+  bill_number: string | null;
 }
 
 export interface PurchaseOrder {

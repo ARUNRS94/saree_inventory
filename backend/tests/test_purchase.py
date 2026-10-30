@@ -344,6 +344,18 @@ async def test_voucher_number_is_stored_on_the_po(db: AsyncSession, masters: Mas
     assert po.voucher_number == "GSS-77"
 
 
+async def test_bill_number_is_stored_on_each_voucher_line(db: AsyncSession, masters: MasterService,
+                                                          purchase: PurchaseService):
+    contact = await masters.create_contact("V", "Raw Material Vendor")
+    item = await masters.create_item(None, "RM", item_type="RM")
+    await db.flush()
+    po = await purchase.create_po(contact.contact_id, [
+        PurchaseLine(item.item_id, 10, Decimal("5"), bill_number=" BILL-9 "),
+        PurchaseLine(item.item_id, 2, Decimal("5")),
+    ])
+    assert [i.bill_number for i in po.items] == ["BILL-9", None]
+
+
 async def test_short_quantity_closes_the_po_without_adding_stock(db: AsyncSession,
                                                                  masters: MasterService,
                                                                  purchase: PurchaseService):

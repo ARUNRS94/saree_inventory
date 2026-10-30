@@ -30,6 +30,7 @@ class PurchaseLine:
     stock_out_item_id: int | None = None
     target_fg_item_id: int | None = None
     lr_number: str | None = None
+    bill_number: str | None = None
 
 
 @dataclass(frozen=True)
@@ -198,6 +199,7 @@ class PurchaseService:
                 rate=line.rate,
                 amount=line.rate * line.quantity,
                 lr_number=line.lr_number,
+                bill_number=(line.bill_number or "").strip() or None,
             ))
 
     async def receive_direct_grn(self, contact_id: int | None, lines: list[GRNLine],

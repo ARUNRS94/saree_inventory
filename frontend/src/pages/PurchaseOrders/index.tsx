@@ -20,9 +20,10 @@ type POLineForm = {
   quantity: string;
   rate: string;
   lr_number: string;
+  bill_number: string;
 };
 
-const emptyLine = (): POLineForm => ({ item_id: '', stock_out_item_id: '', target_fg_item_id: '', quantity: '', rate: '', lr_number: '' });
+const emptyLine = (): POLineForm => ({ item_id: '', stock_out_item_id: '', target_fg_item_id: '', quantity: '', rate: '', lr_number: '', bill_number: '' });
 
 export default function PurchaseOrdersPage() {
   const [data, setData] = useState<PaginatedResponse<PurchaseOrder>>({ items: [], total: 0, page: 1, page_size: 50 });
@@ -98,6 +99,7 @@ export default function PurchaseOrdersPage() {
       quantity: String(item.ordered_qty),
       rate: String(item.rate),
       lr_number: item.lr_number ?? '',
+      bill_number: item.bill_number ?? '',
     }));
     setLines(existing);
     setIssuedWhenOpened(existing.reduce<Record<string, number>>((totals, line) => {
@@ -132,7 +134,7 @@ export default function PurchaseOrdersPage() {
     setError('');
     setLines((prev) => [...prev, draft]);
     // Vendor-level selections usually repeat down the PO, so only the per-item fields reset.
-    setDraft({ ...emptyLine(), stock_out_item_id: draft.stock_out_item_id, target_fg_item_id: draft.target_fg_item_id });
+    setDraft({ ...emptyLine(), stock_out_item_id: draft.stock_out_item_id, target_fg_item_id: draft.target_fg_item_id, bill_number: draft.bill_number });
   };
 
   const removeLine = (index: number) => setLines((prev) => prev.filter((_, i) => i !== index));
@@ -162,6 +164,7 @@ export default function PurchaseOrdersPage() {
           stock_out_item_id: line.stock_out_item_id ? Number(line.stock_out_item_id) : null,
           target_fg_item_id: line.target_fg_item_id ? Number(line.target_fg_item_id) : null,
           lr_number: line.lr_number || null,
+          bill_number: line.bill_number || null,
         })),
       };
       const res = editing
@@ -260,6 +263,7 @@ export default function PurchaseOrdersPage() {
                 <div><label className="label">Quantity *</label><input className="input" type="number" min={1} value={draft.quantity} onChange={(e) => setDraft({ ...draft, quantity: e.target.value })} /></div>
                 <div><label className="label">Rate / Process Charges</label><input className="input" type="number" min={0} step={0.01} value={draft.rate} onChange={(e) => setDraft({ ...draft, rate: e.target.value })} /></div>
                 <div><label className="label">LR Number</label><input className="input" maxLength={50} value={draft.lr_number} onChange={(e) => setDraft({ ...draft, lr_number: e.target.value })} /></div>
+                <div><label className="label">Bill Number</label><input className="input" maxLength={50} value={draft.bill_number} onChange={(e) => setDraft({ ...draft, bill_number: e.target.value })} /></div>
                 <div><label className="label">Amount</label><p className="input bg-gray-50">{formatCurrency(lineAmount(draft))}</p></div>
                 <div className="flex items-end">
                   <button type="button" className="btn-primary text-sm w-full" onClick={addLine}>+ Add to List</button>
@@ -285,6 +289,7 @@ export default function PurchaseOrdersPage() {
                         <th className="px-3 py-2 text-right font-medium">Qty</th>
                         <th className="px-3 py-2 text-right font-medium">Rate</th>
                         <th className="px-3 py-2 text-left font-medium">LR No</th>
+                        <th className="px-3 py-2 text-left font-medium">Bill No</th>
                         <th className="px-3 py-2 text-right font-medium">Amount</th>
                         <th className="px-3 py-2" />
                       </tr>
@@ -299,6 +304,7 @@ export default function PurchaseOrdersPage() {
                           <td className="px-3 py-2 text-right">{line.quantity}</td>
                           <td className="px-3 py-2 text-right">{formatCurrency(line.rate || 0)}</td>
                           <td className="px-3 py-2">{line.lr_number || '-'}</td>
+                          <td className="px-3 py-2">{line.bill_number || '-'}</td>
                           <td className="px-3 py-2 text-right font-medium">{formatCurrency(lineAmount(line))}</td>
                           <td className="px-3 py-2 text-right">
                             <button type="button" className="text-red-600 text-xs hover:underline" onClick={() => removeLine(index)}>Remove</button>
@@ -347,6 +353,7 @@ export default function PurchaseOrdersPage() {
               { header: 'Date', accessor: (r) => formatDate(r.po_date) },
               { header: 'Items', accessor: (r) => r.items.map((i) => i.item_name).join(', '), hideOnMobile: true },
               { header: 'LR No', accessor: (r) => r.items.map((i) => i.lr_number).filter(Boolean).join(', ') || '-', hideOnMobile: true },
+              { header: 'Bill No', accessor: (r) => r.items.map((i) => i.bill_number).filter(Boolean).join(', ') || '-', hideOnMobile: true },
               { header: 'Qty', accessor: (r) => sumBy(r.items, (i) => i.ordered_qty) },
               { header: 'Amount', accessor: (r) => formatCurrency(sumBy(r.items, (i) => i.amount)), hideOnMobile: true },
               { header: 'Status', accessor: (r) => <StatusBadge status={r.status} /> },
@@ -397,6 +404,7 @@ export default function PurchaseOrdersPage() {
                     <th className="px-3 py-2 text-right font-medium">Qty</th>
                     <th className="px-3 py-2 text-right font-medium">Rate</th>
                     <th className="px-3 py-2 text-left font-medium">LR No</th>
+                    <th className="px-3 py-2 text-left font-medium">Bill No</th>
                     <th className="px-3 py-2 text-right font-medium">Amount</th>
                   </tr>
                 </thead>
@@ -410,6 +418,7 @@ export default function PurchaseOrdersPage() {
                       <td className="px-3 py-2 text-right">{item.ordered_qty}</td>
                       <td className="px-3 py-2 text-right">{formatCurrency(item.rate)}</td>
                       <td className="px-3 py-2">{item.lr_number || '-'}</td>
+                      <td className="px-3 py-2">{item.bill_number || '-'}</td>
                       <td className="px-3 py-2 text-right font-medium">{formatCurrency(item.amount)}</td>
                     </tr>
                   ))}
