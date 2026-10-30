@@ -74,7 +74,7 @@ def _money(value: Decimal | float | int) -> str:
 
 async def _company_header(db: AsyncSession) -> dict[str, str]:
     """Letterhead details, as saved under Settings."""
-    wanted = ("company_name", "company_address", "company_phone", "logo_url")
+    wanted = ("company_name", "company_tagline", "company_address", "company_phone", "logo_url")
     rows = await db.execute(select(CompanySettings.key, CompanySettings.value)
                             .where(CompanySettings.key.in_(wanted)))
     saved = {key: (value or "").strip() for key, value in rows}
@@ -103,17 +103,20 @@ def _logo_bytes(logo_url: str) -> bytes | None:
 
 
 def _letterhead(company: dict[str, str], title: str, styles) -> list:
-    """Logo beside the company name, address and phone, then the report title."""
+    """Logo beside the company name, tagline, address and phone, then the report title."""
+    from reportlab.lib.enums import TA_CENTER
+    from reportlab.lib.styles import ParagraphStyle
     from reportlab.platypus import Image, Paragraph, Table, TableStyle
 
+    centred = ParagraphStyle("CompanyLine", parent=styles["Normal"], alignment=TA_CENTER)
     named = bool(company["company_name"])
     details = []
     if named:
         details.append(Paragraph(company["company_name"], styles["Title"]))
-    if company["company_address"]:
-        details.append(Paragraph(company["company_address"].replace("\n", "<br/>"), styles["Normal"]))
-    if company["company_phone"]:
-        details.append(Paragraph(f"Phone: {company['company_phone']}", styles["Normal"]))
+    for line in (company["company_tagline"], company["company_address"],
+                 f"Phone: {company['company_phone']}" if company["company_phone"] else ""):
+        if line:
+            details.append(Paragraph(line.replace("\n", "<br/>"), centred))
 
     logo = None
     data = _logo_bytes(company["logo_url"]) if company["logo_url"] else None
@@ -239,7 +242,8 @@ async def report_csv(
     company = await _company_header(db)
     buffer = io.StringIO()
     writer = csv.writer(buffer)
-    for value in (company["company_name"], company["company_address"].replace("\n", ", "),
+    for value in (company["company_name"], company["company_tagline"],
+                  company["company_address"].replace("\n", ", "),
                   f"Phone: {company['company_phone']}" if company["company_phone"] else ""):
         if value:
             writer.writerow([value])
@@ -274,10 +278,7 @@ async def report_pdf(
     styles = getSampleStyleSheet()
 
     flow = _letterhead(company, stem.replace("_", " ").title(), styles)
-    flow.append(Paragraph(f"Generated {date.today():%d %b %Y} | {len(body)} row(s)", styles["Normal"]))
-    summary = _filter_summary(filters)
-    if summary:
-        flow.append(Paragraph("Filters - " + " | ".join(summary), styles["Normal"]))
+    flow.append(Paragraph(f"{date.today():%d %b %Y}", styles["Normal"]))
     flow.append(Spacer(1, 12))
 
     table = Table([headers] + (body or [["No data"] + [""] * (len(headers) - 1)]), repeatRows=1)

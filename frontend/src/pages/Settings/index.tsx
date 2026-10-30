@@ -7,8 +7,9 @@ import { Trash2, Building2, Image as ImageIcon, MapPin } from 'lucide-react';
 
 export default function SettingsPage() {
   const { can } = useAuth();
-  const { logo_url, company_name, company_address, company_phone, reload } = useSettings();
+  const { logo_url, company_name, company_tagline, company_address, company_phone, reload } = useSettings();
   const [name, setName] = useState(company_name);
+  const [tagline, setTagline] = useState(company_tagline);
   const [logo, setLogo] = useState(logo_url);
   const [address, setAddress] = useState(company_address);
   const [phone, setPhone] = useState(company_phone);
@@ -20,9 +21,9 @@ export default function SettingsPage() {
 
   // Settings arrive after the first render, so the inputs adopt them when they land.
   useEffect(() => {
-    setName(company_name); setLogo(logo_url);
+    setName(company_name); setLogo(logo_url); setTagline(company_tagline);
     setAddress(company_address); setPhone(company_phone);
-  }, [company_name, logo_url, company_address, company_phone]);
+  }, [company_name, logo_url, company_tagline, company_address, company_phone]);
 
   if (!can('settings')) {
     return <div className="text-center py-12 text-gray-500">You do not have access to settings.</div>;
@@ -47,8 +48,8 @@ export default function SettingsPage() {
   const saveName = async () => {
     setSaving(true); setError(''); setSuccess('');
     try {
-      await api.put('/settings', { company_name: name });
-      setSuccess('Company name saved.');
+      await api.put('/settings', { company_name: name, company_tagline: tagline });
+      setSuccess('Company name and tag line saved.');
       reload();
     } catch (err: unknown) {
       setError((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Failed');
@@ -107,10 +108,15 @@ export default function SettingsPage() {
           <h3 className="text-sm font-semibold mb-4 flex items-center gap-2"><Building2 className="h-4 w-4" /> Company Name</h3>
           <div className="space-y-3">
             <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Enter company name" />
+            <div>
+              <label className="label">Tag Line</label>
+              <input className="input" maxLength={120} value={tagline} onChange={(e) => setTagline(e.target.value)}
+                placeholder="Weaving tradition since 1980" />
+            </div>
             <button className="btn-primary text-sm" onClick={saveName} disabled={saving}>
               {saving ? 'Saving...' : 'Save'}
             </button>
-            <p className="text-xs text-gray-400">Displayed in sidebar, login page, and reports.</p>
+            <p className="text-xs text-gray-400">Displayed in sidebar, login page, and reports. The tag line prints under the company name on exports.</p>
           </div>
         </div>
 
